@@ -2,18 +2,36 @@
 name = "phentax"
 version = "0.1.0"
 description = "JAX Implementation of the IMRPhenomT(HM) waveform family"
+author = "Alessandro Santini"
+email = "alessandro.santini@aei.mpg.de"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "black>=25.12.0",
     "diffrax>=0.7.0",
     "interpax>=0.3.12",
+    "isort>=7.0.0",
     "jax>=0.8.1",
     "matplotlib>=3.10.8",
+    "mypy>=1.19.0",
     "phenomxpy>=0.1.1",
     "pytest>=9.0.2",
     "scienceplots>=2.2.0",
     "scipy>=1.16.3",
     "seaborn>=0.13.2",
 ]
+
+[tool.uv]
+package = true
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+disable_error_code = "import-untyped"
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
 
