@@ -13,7 +13,7 @@ from phentax.core.amplitude import (
     compute_amplitude_coeffs_hm,
     imr_amplitude,
 )
-from phentax.core.internals import WaveformParams, compute_derived_params
+from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.core.phase import (
     compute_phase_coeffs_22,
     compute_phase_coeffs_hm,
@@ -51,20 +51,11 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
     distance = 1.0
     fref = 10.0
     phiref = 0.0
+    psi = 0.0
 
-    wparams = WaveformParams(
-        m1=jnp.array(m1),
-        m2=jnp.array(m2),
-        s1z=jnp.array(chi1),
-        s2z=jnp.array(chi2),
-        distance=jnp.array(distance),
-        inclination=jnp.array(inclination),
-        f_ref=jnp.array(fref),
-        phi_ref=jnp.array(phiref),
-        f_min=jnp.array(fmin),
+    dparams = compute_waveform_params(
+        m1, m2, chi1, chi2, distance, inclination, phiref, psi, fref, fmin
     )
-
-    dparams = compute_derived_params(wparams)
     print("Derived parameters computed.")
     print(f"Derived eta: {dparams.eta}, chi1: {dparams.chi1}, chi2: {dparams.chi2}")
 

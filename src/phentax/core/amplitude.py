@@ -2,9 +2,17 @@
 # SPDX-License-Identifier: MIT
 """
 Amplitude coefficient computation for IMRPhenomT(HM).
+======================================================
 
 This module implements the pAmp class functionality from phenomxpy,
 computing all the coefficients needed for the IMR amplitude ansatze.
+
+.. autosummary::
+    :toctree: _autosummary
+    AmplitudeCoeffs
+    compute_amplitude_coeffs_22
+    compute_amplitude_coeffs_hm
+    imr_amplitude
 """
 
 from typing import NamedTuple, Tuple
@@ -14,13 +22,8 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from . import fits
-from .internals import DerivedParams
-from .phase import (
-    PhaseCoeffs,
-    _inspiral_ansatz_domega,
-    _ringdown_ansatz_domega,
-    imr_omega,
-)
+from .internals import WaveformParams
+from .phase import PhaseCoeffs, _inspiral_ansatz_domega, imr_omega
 
 
 class AmplitudeCoeffs(NamedTuple):
@@ -370,7 +373,7 @@ def _compute_pn_amplitude_coeffs(
 
 @jax.jit
 def compute_amplitude_coeffs_22(
-    Dparams: DerivedParams,
+    wf_pafams: WaveformParams,
     phase_coeffs: PhaseCoeffs,
 ) -> AmplitudeCoeffs:
     """
@@ -378,30 +381,36 @@ def compute_amplitude_coeffs_22(
     """
     mode = 22
     pn_real, pn_imag, fac0 = _compute_pn_amplitude_coeffs(
-        Dparams.eta,
-        Dparams.delta,
-        Dparams.chi1,
-        Dparams.chi2,
-        Dparams.m1,
-        Dparams.m2,
+        wf_pafams.eta,
+        wf_pafams.delta,
+        wf_pafams.chi1,
+        wf_pafams.chi2,
+        wf_pafams.m1,
+        wf_pafams.m2,
         mode,
     )
 
     # Inspiral Coefficients
     tinsppoints = jnp.array([-2000.0, -250.0, -150.0])
-    ampInspCP1 = fits.inspiral_amp_cp_22(Dparams.eta, Dparams.chi1, Dparams.chi2, 1)
-    ampInspCP2 = fits.inspiral_amp_cp_22(Dparams.eta, Dparams.chi1, Dparams.chi2, 2)
-    ampInspCP3 = fits.inspiral_amp_cp_22(Dparams.eta, Dparams.chi1, Dparams.chi2, 3)
+    ampInspCP1 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, 22, 1
+    )
+    ampInspCP2 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, 22, 2
+    )
+    ampInspCP3 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, 22, 3
+    )
     ampInspCP = jnp.array([ampInspCP1, ampInspCP2, ampInspCP3])
 
     inspC1, inspC2, inspC3 = _solve_inspiral_amplitude_system(
-        tinsppoints, ampInspCP, Dparams.eta, pn_real, pn_imag, phase_coeffs, fac0
+        tinsppoints, ampInspCP, wf_pafams.eta, pn_real, pn_imag, phase_coeffs, fac0
     )
     pseudo_pn = jnp.array([inspC1, inspC2, inspC3])
 
     # Ringdown Coefficients
-    af = fits.final_spin_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    Mf = fits.final_mass_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    af = fits.final_spin_2017(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
+    Mf = fits.final_mass_2017(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
 
     alpha1RD = 2.0 * jnp.pi * fits.fdamp_22(af) / Mf
     alpha2RD = 2.0 * jnp.pi * fits.fdamp_n2_22(af) / Mf
@@ -411,8 +420,8 @@ def compute_amplitude_coeffs_22(
     alpha2RD_prec = alpha2RD
     alpha21RD_prec = alpha21RD
 
-    ampPeak = fits.peak_amp_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    c3 = fits.rd_amp_c3_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    ampPeak = fits.peak_amp_22(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
+    c3 = fits.rd_amp_c3_22(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
     c2 = alpha21RD
     c2_prec = alpha21RD_prec
 
@@ -432,10 +441,12 @@ def compute_amplitude_coeffs_22(
 
     # Intermediate Coefficients
     inspiral_cut = -150.0
-    tshift = fits.tshift_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    tshift = fits.tshift_22(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
     ringdown_cut = tshift
 
-    ampMergerCP1 = fits.intermediate_amp_cp1_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    ampMergerCP1 = fits.intermediate_amp_cp1(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, 22
+    )
     tcpMerger = -25.0
 
     mergerC1, mergerC2, mergerC3, mergerC4, dampMECO = (
@@ -446,7 +457,7 @@ def compute_amplitude_coeffs_22(
             alpha1RD,
             ampPeak,
             ampMergerCP1,
-            Dparams.eta,
+            wf_pafams.eta,
             pn_real,
             pn_imag,
             pseudo_pn,
@@ -484,7 +495,7 @@ def compute_amplitude_coeffs_22(
 
 @jax.jit
 def compute_amplitude_coeffs_hm(
-    Dparams: DerivedParams,
+    wf_pafams: WaveformParams,
     phase_coeffs_22: PhaseCoeffs,
     mode: int | Array,
 ) -> AmplitudeCoeffs:
@@ -492,12 +503,12 @@ def compute_amplitude_coeffs_hm(
     Compute all amplitude coefficients for HM modes.
     """
     pn_real, pn_imag, fac0 = _compute_pn_amplitude_coeffs(
-        Dparams.eta,
-        Dparams.delta,
-        Dparams.chi1,
-        Dparams.chi2,
-        Dparams.m1,
-        Dparams.m2,
+        wf_pafams.eta,
+        wf_pafams.delta,
+        wf_pafams.chi1,
+        wf_pafams.chi2,
+        wf_pafams.m1,
+        wf_pafams.m2,
         mode,
     )
 
@@ -506,19 +517,25 @@ def compute_amplitude_coeffs_hm(
 
     # Vectorized fit call for collocation points
     # fits.inspiral_amp_cp(eta, chi1, chi2, mode, k)
-    ampInspCP1 = fits.inspiral_amp_cp(Dparams.eta, Dparams.chi1, Dparams.chi2, mode, 1)
-    ampInspCP2 = fits.inspiral_amp_cp(Dparams.eta, Dparams.chi1, Dparams.chi2, mode, 2)
-    ampInspCP3 = fits.inspiral_amp_cp(Dparams.eta, Dparams.chi1, Dparams.chi2, mode, 3)
+    ampInspCP1 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode, 1
+    )
+    ampInspCP2 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode, 2
+    )
+    ampInspCP3 = fits.inspiral_amp_cp(
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode, 3
+    )
     ampInspCP = jnp.array([ampInspCP1, ampInspCP2, ampInspCP3])
 
     inspC1, inspC2, inspC3 = _solve_inspiral_amplitude_system(
-        tinsppoints, ampInspCP, Dparams.eta, pn_real, pn_imag, phase_coeffs_22, fac0
+        tinsppoints, ampInspCP, wf_pafams.eta, pn_real, pn_imag, phase_coeffs_22, fac0
     )
     pseudo_pn = jnp.array([inspC1, inspC2, inspC3])
 
     # Ringdown Coefficients
-    af = fits.final_spin_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    Mf = fits.final_mass_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    af = fits.final_spin_2017(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
+    Mf = fits.final_mass_2017(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2)
 
     alpha1RD = 2.0 * jnp.pi * fits.fdamp(af, mode) / Mf
     alpha2RD = 2.0 * jnp.pi * fits.fdamp_n2(af, mode) / Mf
@@ -528,8 +545,8 @@ def compute_amplitude_coeffs_hm(
     alpha2RD_prec = alpha2RD
     alpha21RD_prec = alpha21RD
 
-    ampPeak = fits.peak_amp(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
-    c3 = fits.rd_amp_c3(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
+    ampPeak = fits.peak_amp(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode)
+    c3 = fits.rd_amp_c3(wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode)
     c2 = alpha21RD
     c2_prec = alpha21RD_prec
 
@@ -550,14 +567,14 @@ def compute_amplitude_coeffs_hm(
     # Intermediate Coefficients
     inspiral_cut = -150.0
     tshift = fits.tshift(
-        Dparams.eta, Dparams.chi1, Dparams.chi2, mode
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode
     )  # HM uses 22 tshift?
     # phenomxpy: self.tshift = IMRPhenomT_tshift(self._pWF)
     # IMRPhenomT_tshift uses 22 mode fits.
     ringdown_cut = tshift
 
     ampMergerCP1 = fits.intermediate_amp_cp1(
-        Dparams.eta, Dparams.chi1, Dparams.chi2, mode
+        wf_pafams.eta, wf_pafams.chi1, wf_pafams.chi2, mode
     )
     tcpMerger = -25.0
 
@@ -569,7 +586,7 @@ def compute_amplitude_coeffs_hm(
             alpha1RD,
             ampPeak,
             ampMergerCP1,
-            Dparams.eta,
+            wf_pafams.eta,
             pn_real,
             pn_imag,
             pseudo_pn,
@@ -579,7 +596,7 @@ def compute_amplitude_coeffs_hm(
     )
 
     # Calculate phiCutPNAMP
-    omega_cut = imr_omega(inspiral_cut, Dparams.eta, phase_coeffs_22)
+    omega_cut = imr_omega(inspiral_cut, wf_pafams.eta, phase_coeffs_22)
     x_cut = jnp.power(omega_cut * 0.5, 2.0 / 3.0)
     amp2 = _inspiral_ansatz_amplitude(x_cut, fac0, pn_real, pn_imag, pseudo_pn)
     phiCutPNAMP = jnp.arctan2(jnp.imag(amp2), jnp.real(amp2))
@@ -593,7 +610,7 @@ def compute_amplitude_coeffs_hm(
     omegaCutPNAMP = -jnp.real(
         _der_complex_amp_orientation(
             inspiral_cut,
-            Dparams.eta,
+            wf_pafams.eta,
             pn_real,
             pn_imag,
             pseudo_pn,
@@ -1000,14 +1017,14 @@ def _der_complex_amp_orientation(
             * der_x_per_omega
             * der_omega_per_t
         )
-    else:
-        return (
-            fac0
-            * (ampreal * (dampreal * x + ampreal) + ampimag * (dampimag * x + ampimag))
-            / amp
-            * der_x_per_omega
-            * der_omega_per_t
-        )
+
+    return (
+        fac0
+        * (ampreal * (dampreal * x + ampreal) + ampimag * (dampimag * x + ampimag))
+        / amp
+        * der_x_per_omega
+        * der_omega_per_t
+    )
 
 
 def _solve_intermediate_amplitude_system(

@@ -5,6 +5,15 @@ Phase and omega coefficient computation for IMRPhenomT(HM).
 
 This module implements the pPhase class functionality from phenomxpy,
 computing all the coefficients needed for the IMR omega and phase ansatze.
+
+.. autosummary::
+    :toctree: _autosummary
+    PhaseCoeffs
+    compute_phase_coeffs_22
+    compute_phase_coeffs_hm
+    imr_phase
+    imr_omega
+    get_time_of_frequency
 """
 
 from typing import NamedTuple, Tuple
@@ -14,10 +23,10 @@ import jax.numpy as jnp
 import optimistix as optx
 from jaxtyping import Array
 
-jax.config.update("jax_enable_x64", True)
-
 from . import collocation, fits, pn_coeffs
-from .internals import DerivedParams
+from .internals import WaveformParams
+
+jax.config.update("jax_enable_x64", True)
 
 
 class PhaseCoeffs(NamedTuple):
@@ -26,6 +35,89 @@ class PhaseCoeffs(NamedTuple):
 
     Contains PN coefficients, pseudo-PN coefficients, ringdown parameters,
     and intermediate region coefficients.
+
+    Parameters
+    ----------
+    mode : int | Array
+        Mode number (e.g., 22, 33, 44, etc.).
+    omega1PN : float | Array
+        1PN coefficient for omega inspiral.
+    omega1halfPN : float | Array
+        1.5PN coefficient for omega inspiral.
+    omega2PN : float | Array
+        2PN coefficient for omega inspiral.
+    omega2halfPN : float | Array
+        2.5PN coefficient for omega inspiral.
+    omega3PN : float | Array
+        3PN coefficient for omega inspiral.
+    omega3halfPN : float | Array
+        3.5PN coefficient for omega inspiral.
+    omegaInspC1 : float | Array
+        1st pseudo-PN coefficient for omega inspiral.
+    omegaInspC2 : float | Array
+        2nd pseudo-PN coefficient for omega inspiral.
+    omegaInspC3 : float | Array
+        3rd pseudo-PN coefficient for omega inspiral.
+    omegaInspC4 : float | Array
+        4th pseudo-PN coefficient for omega inspiral.
+    omegaInspC5 : float | Array
+        5th pseudo-PN coefficient for omega inspiral.
+    omegaInspC6 : float | Array
+        6th pseudo-PN coefficient for omega inspiral.
+    omegaRING : float | Array
+        Ringdown frequency (2*pi*fring).
+    alpha1RD : float | Array
+        Ringdown damping rate (2*pi*fdamp).
+    omegaRING_prec : float | Array
+        Ringdown frequency for precessing case.
+    omegaPeak : float | Array
+        Peak frequency.
+    c1 : float | Array
+        1st ringdown ansatz coefficient.
+    c2 : float | Array
+        2nd ringdown ansatz coefficient.
+    c3 : float | Array
+        3rd ringdown ansatz coefficient.
+    c4 : float | Array
+        4th ringdown ansatz coefficient.
+    c1_prec : float | Array
+        1st ringdown ansatz coefficient for precessing case.
+    omegaMergerC1 : float | Array
+        1st intermediate region coefficient.
+    omegaMergerC2 : float | Array
+        2nd intermediate region coefficient.
+    omegaMergerC3 : float | Array
+        3rd intermediate region coefficient.
+    omegaCut : float | Array
+        Omega at inspiral cut.
+    domegaCut : float | Array
+        domega/dt at inspiral cut.
+    domegaPeak : float | Array
+        domega/dt at peak.
+    inspiral_cut : float | Array
+        Transition time inspiral -> intermediate.
+    ringdown_cut : float | Array
+        Transition time intermediate -> ringdown (= 0, peak time).
+    tt0 : float | Array
+        t0 from fit.
+    tEarly : float | Array
+        Early time for phase offset.
+    omegaCutPNAMP : float | Array
+        Omega contribution from complex amplitude at transtion time ``pAmp.inspiral_cut``.
+    phiCutPNAMP : float | Array
+        Phase contribution from complex amplitude at transtion time ``pAmp.inspiral_cut``.
+    phOffInsp : float | Array
+        Phase offset for inspiral.
+    phOffMerger : float | Array
+        Phase offset for intermediate region.
+    phOffRD : float | Array
+        Phase offset for ringdown.
+    phoff : float | Array
+        phase offset for different modes.
+    phiref0 : float | Array
+        reference phase of the 22 mode at t=tref.
+    powers_of_5 : Array
+        Powers of 5^(n/8) for n=0..7 for phase computation.
     """
 
     mode: int | Array
@@ -95,17 +187,17 @@ class PhaseCoeffs(NamedTuple):
     phiref0: float | Array
 
     # Powers of 5 for phase computation
-    powers_of_5: jnp.ndarray
+    powers_of_5: Array
 
 
 def _compute_pn_and_pseudo_pn(
-    Dparams: DerivedParams,
+    wf_params: WaveformParams,
 ) -> Tuple[
     jnp.ndarray,
     collocation.OmegaPseudoPNCoeffs,
     float | Array,
     float | Array,
-    jnp.ndarray,
+    Array,
 ]:
     """
     Compute PN and pseudo-PN coefficients, which are common to all modes.
@@ -118,7 +210,12 @@ def _compute_pn_and_pseudo_pn(
 
     # PN Coefficients
     omega_pn = pn_coeffs.compute_omega_pn_coeffs(
-        Dparams.eta, Dparams.chi1, Dparams.chi2, Dparams.delta, Dparams.m1, Dparams.m2
+        wf_params.eta,
+        wf_params.chi1,
+        wf_params.chi2,
+        wf_params.delta,
+        wf_params.m1,
+        wf_params.m2,
     )
     omega_pn_array = jnp.array(
         [
@@ -133,7 +230,7 @@ def _compute_pn_and_pseudo_pn(
 
     # Collocation points and pseudo-PN coefficients
     omega_cp_values, tt0, tEarly = collocation.compute_omega_collocation_points(
-        Dparams.eta, Dparams.chi1, Dparams.chi2, omega_pn_array
+        wf_params.eta, wf_params.chi1, wf_params.chi2, omega_pn_array
     )
 
     pseudo_pn = collocation.compute_omega_pseudo_pn_coeffs(
@@ -145,45 +242,45 @@ def _compute_pn_and_pseudo_pn(
 
 @jax.jit
 def compute_phase_coeffs_22(
-    Dparams: DerivedParams,
-) -> tuple[DerivedParams, PhaseCoeffs]:
+    wf_params: WaveformParams,
+) -> tuple[WaveformParams, PhaseCoeffs]:
     """
     Compute all phase/omega coefficients for the 22 mode.
 
     Parameters
     ----------
-    Dparams : DerivedParams
-        Derived parameters for the waveform.
+    wf_params : WaveformParams
+        Waveform parameters for the waveform.
 
     Returns
     -------
-    tuple[DerivedParams, PhaseCoeffs]
+    tuple[WaveformParams, PhaseCoeffs]
         Updated derived parameters and phase coefficients for mode 22.
     """
     # Common coefficients
     omega_pn_array, pseudo_pn, tt0, tEarly, powers_of_5 = _compute_pn_and_pseudo_pn(
-        Dparams
+        wf_params
     )
 
     # Final state
-    af = fits.final_spin_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    Mfinal = fits.final_mass_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    af = fits.final_spin_2017(wf_params.eta, wf_params.chi1, wf_params.chi2)
+    Mfinal = fits.final_mass_2017(wf_params.eta, wf_params.chi1, wf_params.chi2)
 
     # Ringdown quantities
     omegaRING = 2.0 * jnp.pi * fits.fring_22(af) / Mfinal
     alpha1RD = 2.0 * jnp.pi * fits.fdamp_22(af) / Mfinal
     omegaRING_prec = omegaRING
 
-    omegaPeak = fits.peak_freq_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    omegaPeak = fits.peak_freq_22(wf_params.eta, wf_params.chi1, wf_params.chi2)
 
-    c2 = fits.rd_freq_d2_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    c3 = fits.rd_freq_d3_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    c2 = fits.rd_freq_d2_22(wf_params.eta, wf_params.chi1, wf_params.chi2)
+    c3 = fits.rd_freq_d3_22(wf_params.eta, wf_params.chi1, wf_params.chi2)
     c4 = 0.0
     c1 = (1.0 + c3 + c4) * (omegaRING - omegaPeak) / c2 / (c3 + 2.0 * c4)
     c1_prec = c1
 
     # Cuts
-    inspiral_cut = -26.982976386771437 / Dparams.eta
+    inspiral_cut = -26.982976386771437 / wf_params.eta
     ringdown_cut = 0.0
 
     # int | Arrayermediate region
@@ -199,19 +296,19 @@ def compute_phase_coeffs_22(
     )
 
     omegaCut = _inspiral_ansatz_omega_single(
-        inspiral_cut, Dparams.eta, omega_pn_array, pseudo_pn_array
+        inspiral_cut, wf_params.eta, omega_pn_array, pseudo_pn_array, m=2
     )
 
     domegaCut = _inspiral_ansatz_domega(
-        inspiral_cut, Dparams.eta, omega_pn_array, pseudo_pn_array
+        inspiral_cut, wf_params.eta, omega_pn_array, pseudo_pn_array, m=2
     )
 
     domegaPeak = -_ringdown_ansatz_domega(0.0, c1, c2, c3, c4) / omegaRING
 
-    tcpMerger = -5.0 / (Dparams.eta * jnp.power(0.95, 8))
+    tcpMerger = -5.0 / (wf_params.eta * jnp.power(0.95, 8))
     omegaMergerCP = (
         1.0
-        - fits.intermediate_freq_cp1_22(Dparams.eta, Dparams.chi1, Dparams.chi2)
+        - fits.intermediate_freq_cp1_22(wf_params.eta, wf_params.chi1, wf_params.chi2)
         / omegaRING
     )
     omegaCutBar = 1.0 - omegaCut / omegaRING
@@ -230,13 +327,13 @@ def compute_phase_coeffs_22(
     )
 
     # Phase offsets
-    thetabarini = jnp.power(Dparams.eta * (tt0 - tEarly), -1.0 / 8.0)
+    thetabarini = jnp.power(wf_params.eta * (tt0 - tEarly), -1.0 / 8.0)
     pn_phase_at_thetabarini = _pn_ansatz_phase(
-        thetabarini, Dparams.eta, powers_of_5, omega_pn_array
+        thetabarini, wf_params.eta, powers_of_5, omega_pn_array
     )
     inspiral_phase_at_tEarly = _inspiral_ansatz_phase_value_22(
         tEarly,
-        Dparams.eta,
+        wf_params.eta,
         powers_of_5,
         omega_pn_array,
         pseudo_pn_array,
@@ -246,7 +343,7 @@ def compute_phase_coeffs_22(
 
     inspiral_phase_at_cut = _inspiral_ansatz_phase_value_22(
         inspiral_cut,
-        Dparams.eta,
+        wf_params.eta,
         powers_of_5,
         omega_pn_array,
         pseudo_pn_array,
@@ -323,41 +420,41 @@ def compute_phase_coeffs_22(
 
     def _compute_min(_):
         return get_time_of_frequency(
-            Dparams.Mf_min, Dparams.eta, PhaseCoeffs22, Dparams.t_low
+            wf_params.Mf_min, wf_params.eta, PhaseCoeffs22, wf_params.t_low
         )
 
     def _use_existing_min(_):
-        return Dparams.Mt_min
+        return wf_params.Mt_min
 
     # This works inside vmap because isnan returns a boolean tracer
     _Mt_min = jax.lax.cond(
-        jnp.isnan(Dparams.Mt_min), _compute_min, _use_existing_min, operand=None
+        jnp.isnan(wf_params.Mt_min), _compute_min, _use_existing_min, operand=None
     )
 
     def _compute_ref(_):
         return get_time_of_frequency(
-            Dparams.Mf_ref, Dparams.eta, PhaseCoeffs22, Dparams.t_low
+            wf_params.Mf_ref, wf_params.eta, PhaseCoeffs22, wf_params.t_low
         )
 
     def _use_existing_ref(_):
-        return Dparams.Mt_ref
+        return wf_params.Mt_ref
 
     # This works inside vmap because isnan returns a boolean tracer
     _Mt_ref = jax.lax.cond(
-        jnp.isnan(Dparams.Mt_ref), _compute_ref, _use_existing_ref, operand=None
+        jnp.isnan(wf_params.Mt_ref), _compute_ref, _use_existing_ref, operand=None
     )
 
-    Dparams = Dparams._replace(Mt_min=_Mt_min)
-    Dparams = Dparams._replace(Mt_ref=_Mt_ref)
+    wf_params = wf_params._replace(Mt_min=_Mt_min)
+    wf_params = wf_params._replace(Mt_ref=_Mt_ref)
 
-    phiref0 = imr_phase(_Mt_ref, Dparams.eta, PhaseCoeffs22)  # phase at tref
-    # phiref0 = imr_phase(Dparams.t_ref, Dparams.eta, PhaseCoeffs22)  # phase at tref
-    return Dparams, PhaseCoeffs22._replace(phiref0=phiref0)
+    phiref0 = imr_phase(_Mt_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
+    # phiref0 = imr_phase(wf_params.t_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
+    return wf_params, PhaseCoeffs22._replace(phiref0=phiref0)
 
 
 @jax.jit
 def compute_phase_coeffs_hm(
-    Dparams: DerivedParams,
+    wf_params: WaveformParams,
     Phase22: PhaseCoeffs,
     OmegaCutPNAMP: Array,
     PhiCutPNAMP: Array,
@@ -368,24 +465,24 @@ def compute_phase_coeffs_hm(
     """
     # Common coefficients
     omega_pn_array, pseudo_pn, tt0, tEarly, powers_of_5 = _compute_pn_and_pseudo_pn(
-        Dparams
+        wf_params
     )
 
     m = mode % 10
 
     # Final state
-    af = fits.final_spin_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
-    Mfinal = fits.final_mass_2017(Dparams.eta, Dparams.chi1, Dparams.chi2)
+    af = fits.final_spin_2017(wf_params.eta, wf_params.chi1, wf_params.chi2)
+    Mfinal = fits.final_mass_2017(wf_params.eta, wf_params.chi1, wf_params.chi2)
 
     # Ringdown quantities
     omegaRING = 2.0 * jnp.pi * fits.fring(af, mode) / Mfinal
     alpha1RD = 2.0 * jnp.pi * fits.fdamp(af, mode) / Mfinal
     omegaRING_prec = omegaRING
 
-    omegaPeak = fits.peak_freq(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
+    omegaPeak = fits.peak_freq(wf_params.eta, wf_params.chi1, wf_params.chi2, mode)
 
-    c2 = fits.rd_freq_d2(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
-    c3 = fits.rd_freq_d3(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
+    c2 = fits.rd_freq_d2(wf_params.eta, wf_params.chi1, wf_params.chi2, mode)
+    c3 = fits.rd_freq_d3(wf_params.eta, wf_params.chi1, wf_params.chi2, mode)
     c4 = 0.0
     c1 = (1.0 + c3 + c4) * (omegaRING - omegaPeak) / c2 / (c3 + 2.0 * c4)
     c1_prec = c1
@@ -395,9 +492,11 @@ def compute_phase_coeffs_hm(
     ringdown_cut = 0.0
 
     # int | Arrayermediate region
-    omegaCut = m / 2.0 * imr_omega(inspiral_cut, eta=Dparams.eta, phase_coeffs=Phase22)
+    omegaCut = (
+        m / 2.0 * imr_omega(inspiral_cut, eta=wf_params.eta, phase_coeffs=Phase22)
+    )
     domegaCut = compute_domega_cut(
-        inspiral_cut, Phase22.inspiral_cut, Dparams.eta, Phase22
+        inspiral_cut, Phase22.inspiral_cut, wf_params.eta, Phase22
     )
     domegaCut = -m / 2.0 * domegaCut / omegaRING
 
@@ -406,7 +505,9 @@ def compute_phase_coeffs_hm(
     tcpMerger = -25.0
     omegaMergerCP = (
         1.0
-        - fits.intermediate_freq_cp1(Dparams.eta, Dparams.chi1, Dparams.chi2, mode)
+        - fits.intermediate_freq_cp1(
+            wf_params.eta, wf_params.chi1, wf_params.chi2, mode
+        )
         / omegaRING
     )
     omegaCutBar = 1.0 - (omegaCut + OmegaCutPNAMP) / omegaRING
@@ -426,7 +527,7 @@ def compute_phase_coeffs_hm(
     # Phase offsets
     phOffInsp = 0.0
     phMECOinsp = (
-        m / 2.0 * imr_phase(inspiral_cut, eta=Dparams.eta, phase_coeffs=Phase22)
+        m / 2.0 * imr_phase(inspiral_cut, eta=wf_params.eta, phase_coeffs=Phase22)
     )
     phMECOmerger = _intermediate_ansatz_phase_value(
         inspiral_cut,
@@ -503,7 +604,7 @@ def imr_omega(
     time: float | Array, eta: float | Array, phase_coeffs: PhaseCoeffs
 ) -> float | Array:
     """Compute IMR omega at time using the full ansatz."""
-
+    m = phase_coeffs.mode % 10
     # Prepare coefficient arrays for helper functions
     omega_pn_coeffs = jnp.array(
         [
@@ -536,6 +637,7 @@ def imr_omega(
                 eta,
                 omega_pn_coeffs,
                 omega_pseudo_pn_coeffs,
+                m,
             )
 
         def _intermediate(t):
@@ -737,7 +839,7 @@ def get_time_of_frequency(
         solver,
         args=freq,
         y0=-0.01 * freq ** (-2.7),
-        options=dict(lower=t_low, upper=t_high),
+        options={"lower": t_low, "upper": t_high},
         max_steps=1000,
     )
 
@@ -835,6 +937,7 @@ def _inspiral_ansatz_omega_single(
     eta: Array,
     omega_pn_coeffs: jnp.ndarray,
     omega_pseudo_pn_coeffs: jnp.ndarray,
+    m: int | Array = 2,
 ) -> Array:
     """Evaluate inspiral omega ansatz at a single time."""
     theta = jnp.power(-eta * time / 5.0, -1.0 / 8.0)
@@ -860,7 +963,7 @@ def _inspiral_ansatz_omega_single(
         + omega_pseudo_pn_coeffs[5] * theta13
     )
 
-    return taylort3 + 2.0 * fac * pseudo_pn_sum
+    return (taylort3 + 2.0 * fac * pseudo_pn_sum) * (m / 2.0)
 
 
 @jax.jit
@@ -912,12 +1015,13 @@ def _inspiral_ansatz_domega(
     eta: Array,
     omega_pn_coeffs: jnp.ndarray,
     omega_pseudo_pn_coeffs: jnp.ndarray,
+    m: int | Array = 2,
 ) -> Array:
     """Compute d(omega)/dt for inspiral ansatz at a single time."""
     # Use JAX autodiff
     return jax.grad(
         lambda t: _inspiral_ansatz_omega_single(
-            t, eta, omega_pn_coeffs, omega_pseudo_pn_coeffs
+            t, eta, omega_pn_coeffs, omega_pseudo_pn_coeffs, m
         )
     )(time)
 

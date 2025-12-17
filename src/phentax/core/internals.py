@@ -1,10 +1,16 @@
 # Copyright (C) 2025 Alessandro Santini
 # SPDX-License-Identifier: MIT
 """
+Internals
+============================
 Internal data structures and coefficient computation for IMRPhenomT(HM).
 
-Contains WaveformParams, PhaseCoeffs, AmpCoeffs as frozen dataclasses,
-and functions to compute calibration coefficients from physical parameters.
+.. autosummary::
+   :toctree: _autosummary
+
+   WaveformParams
+   compute_waveform_params
+   compute_time_grid
 """
 
 from typing import NamedTuple, Tuple
@@ -17,58 +23,13 @@ from ..utils.constants import MRSUN_SI, MTSUN_SI, PC_SI
 from ..utils.utility import hz_to_mass, m1ofeta, m2ofeta, mass_to_hz, second_to_mass
 from . import fits
 
+
 # =============================================================================
 # Data structures (pytree-compatible)
 # =============================================================================
-
-
 class WaveformParams(NamedTuple):
     """
-    Physical parameters for waveform generation.
-
-    All masses in solar masses, spins dimensionless, distances in Mpc.
-
-    Parameters
-    ----------
-    m1 : float | Array
-        Primary mass (M_sun).
-    m2 : float | Array
-        Secondary mass (M_sun).
-    s1z : float | Array
-        Primary spin z-component (dimensionless).
-    s2z : float | Array
-        Secondary spin z-component (dimensionless).
-    distance : float | Array
-        Luminosity distance (Mpc).
-    inclination : float | Array
-        Inclination angle (radians).
-    phi_ref : float | Array
-        Reference phase (radians).
-    psi : float | Array
-        Polarization angle (radians).
-    f_ref : float | Array
-        Reference frequency (Hz), or 0 for peak.
-    f_min : float | Array
-        Minimum frequency (Hz).
-    t_ref : Optional[float | Array]
-        Reference time (seconds), default 0.0.
-    """
-
-    m1: float | Array  # Primary mass (M_sun)
-    m2: float | Array  # Secondary mass (M_sun)
-    s1z: float | Array  # Primary spin z-component (dimensionless)
-    s2z: float | Array  # Secondary spin z-component (dimensionless)
-    distance: float | Array  # Luminosity distance (Mpc)
-    inclination: float | Array  # Inclination angle (radians)
-    phi_ref: float | Array  # Reference phase (radians)
-    psi: float | Array  # Polarization angle (radians)
-    f_ref: float | Array  # Reference frequency (Hz), or 0 for peak
-    f_min: float | Array  # Minimum frequency (Hz)
-
-
-class DerivedParams(NamedTuple):
-    """
-    Derived quantities computed from physical parameters.
+    Physical parameters and derived quantities.
     These are intermediate quantities used throughout the waveform computation.
 
     Note that while the waveform interface assumes `m1` and `m2` are in solar masses,
@@ -169,13 +130,22 @@ class DerivedParams(NamedTuple):
 # =============================================================================
 
 
-def compute_derived_params(
-    params: WaveformParams,
+def compute_waveform_params(
+    m1: float | Array,  # Primary mass (M_sun)
+    m2: float | Array,  # Secondary mass (M_sun)
+    s1z: float | Array,  # Primary spin z-component (dimensionless)
+    s2z: float | Array,  # Secondary spin z-component (dimensionless)
+    distance: float | Array,  # Luminosity distance (Mpc)
+    inclination: float | Array,  # Inclination angle (radians)
+    phi_ref: float | Array,  # Reference phase (radians)
+    psi: float | Array,  # Polarization angle (radians)
+    f_ref: float | Array,  # Reference frequency (Hz), or 0 for peak
+    f_min: float | Array,  # Minimum frequency (Hz)
     delta_t: float | Array = 5.0,
     t_min: float | Array = jnp.nan,
     t_ref: float | Array = jnp.nan,
     t_low: float | Array = 0.0,
-) -> DerivedParams:
+) -> WaveformParams:
     """
     Compute derived quantities from physical parameters.
 
@@ -189,15 +159,11 @@ def compute_derived_params(
     DerivedParams
         Derived quantities for waveform computation.
     """
-    mass1, mass2 = params.m1, params.m2
-    s1z, s2z = params.s1z, params.s2z
-    distance = params.distance
-
     # compute dimensionless masses
 
     # Ensure m1 >= m2
-    mass1 = jnp.maximum(mass1, mass2)
-    mass2 = jnp.minimum(mass1, mass2)
+    mass1 = jnp.maximum(m1, m2)
+    mass2 = jnp.minimum(m1, m2)
 
     total_mass = mass1 + mass2
     eta = mass1 * mass2 / (total_mass * total_mass)
@@ -218,8 +184,8 @@ def compute_derived_params(
     # Total mass in seconds
     M_sec = total_mass * MTSUN_SI
 
-    Mf_min = hz_to_mass(params.f_min, total_mass)
-    Mf_ref = hz_to_mass(params.f_ref, total_mass)
+    Mf_min = hz_to_mass(f_min, total_mass)
+    Mf_ref = hz_to_mass(f_ref, total_mass)
 
     Mdelta_t = second_to_mass(delta_t, total_mass)
 
@@ -231,7 +197,7 @@ def compute_derived_params(
     D_m = distance * 1e6 * PC_SI
     amp_0 = total_mass * MRSUN_SI / D_m
 
-    return DerivedParams(
+    return WaveformParams(
         m1=m1,
         m2=m2,
         M=M,
@@ -244,9 +210,9 @@ def compute_derived_params(
         chi1=s1z,
         chi2=s2z,
         distance=distance,
-        inclination=params.inclination,
-        phi_ref=params.phi_ref,
-        psi=params.psi,
+        inclination=inclination,
+        phi_ref=phi_ref,
+        psi=psi,
         Mf=Mf,
         af=af,
         Mf_min=Mf_min,

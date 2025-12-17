@@ -29,7 +29,7 @@ from phentax.core import (
     imr_amplitude,
     imr_phase,
 )
-from phentax.core.internals import DerivedParams, WaveformParams, compute_derived_params
+from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.config import setup_logging
 from phentax.utils.utility import check_equal_bhs, mode_to_lm
 from phentax.utils.ylm import spin_weighted_spherical_harmonic_all_modes
@@ -104,10 +104,10 @@ class IMRPhenomTHM:
             self.negative_mms = jnp.array([])
 
     def _compute_h22(
-        self, times: Array, dparams: DerivedParams, return_coeffs: bool = False
+        self, times: Array, wf_params: WaveformParams, return_coeffs: bool = False
     ) -> (
-        tuple[DerivedParams, Array, Array, PhaseCoeffs]
-        | tuple[DerivedParams, Array, Array]
+        tuple[WaveformParams, Array, Array, PhaseCoeffs]
+        | tuple[WaveformParams, Array, Array]
     ):
         """
         Compute amplitude and phase for the (2,2) mode.
@@ -116,14 +116,14 @@ class IMRPhenomTHM:
         ----------
         times : Array
             Time array.
-        dparams : DerivedParams
-            Derived parameters of the binary.
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
         return_coeffs : bool, default False
             Whether to return phase coefficients along with amplitude and phase.
 
         Returns
         -------
-        dparams : DerivedParams
+        wf_params : WaveformParams
             Updated derived parameters. The computation of the (2,2) mode may update some time or frequency related parameters.
         amplitude_22 : Array
             Amplitude array for the (2,2) mode.
@@ -132,13 +132,13 @@ class IMRPhenomTHM:
         phase_coeffs : PhaseCoeffs, optional
             Phase coefficients for the (2,2) mode, returned if `return_coeffs` is True. This are required for the higher modes.
         """
-        dparams, phase_coeffs = compute_phase_coeffs_22(dparams)
-        amplitude_coeffs = compute_amplitude_coeffs_22(dparams, phase_coeffs)
+        wf_params, phase_coeffs = compute_phase_coeffs_22(wf_params)
+        amplitude_coeffs = compute_amplitude_coeffs_22(wf_params, phase_coeffs)
 
         amplitude_22 = jnp.abs(
             imr_amplitude(
                 times,
-                dparams.eta,
+                wf_params.eta,
                 amplitude_coeffs,
                 phase_coeffs,
             )
@@ -146,22 +146,22 @@ class IMRPhenomTHM:
 
         phase_22 = imr_phase(
             times,
-            dparams.eta,
+            wf_params.eta,
             phase_coeffs,
         )
 
         if (
             return_coeffs
         ):  # return also phase coeffs. this assumes it will be used for hm computation
-            return dparams, amplitude_22[None, :], phase_22[None, :], phase_coeffs
+            return wf_params, amplitude_22[None, :], phase_22[None, :], phase_coeffs
         else:
-            return dparams, amplitude_22[None, :], phase_22[None, :]
+            return wf_params, amplitude_22[None, :], phase_22[None, :]
 
     def _compute_hm(
         self,
         mode: int | Array,
         times: Array,
-        dparams: DerivedParams,
+        wf_params: WaveformParams,
         phase_coeffs_22: PhaseCoeffs,
         phase_22: Array,
         equal_black_holes: bool,
@@ -176,8 +176,8 @@ class IMRPhenomTHM:
             The (l,m) mode to compute, encoded as lm (e.g., 21 for (2,1)).
         times : Array
             Time array.
-        dparams : DerivedParams
-            Derived parameters of the binary.
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
         phase_coeffs_22 : PhaseCoeffs
             Phase coefficients for the (2,2) mode.
         phase_22 : Array
@@ -201,9 +201,9 @@ class IMRPhenomTHM:
 
         m = mode % 10
 
-        amplitude_coeffs = compute_amplitude_coeffs_hm(dparams, phase_coeffs_22, mode)
+        amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
         phase_coeffs = compute_phase_coeffs_hm(
-            dparams,
+            wf_params,
             phase_coeffs_22,
             OmegaCutPNAMP=amplitude_coeffs.omegaCutPNAMP,
             PhiCutPNAMP=amplitude_coeffs.phiCutPNAMP,
@@ -212,7 +212,7 @@ class IMRPhenomTHM:
 
         amplitude_hm = imr_amplitude(
             times,
-            dparams.eta,
+            wf_params.eta,
             amplitude_coeffs,
             phase_coeffs_22,
         )
@@ -220,7 +220,7 @@ class IMRPhenomTHM:
         phase_hm = (
             imr_phase(
                 times,
-                dparams.eta,
+                wf_params.eta,
                 phase_coeffs,
                 phase_22=phase_22,
             )
@@ -232,8 +232,8 @@ class IMRPhenomTHM:
 
     # @partial(jax.jit, static_argnames=['self'])
     def _compute_all_modes(
-        self, times: Array, dparams: DerivedParams
-    ) -> tuple[DerivedParams, Array, Array]:
+        self, times: Array, wf_params: WaveformParams
+    ) -> tuple[WaveformParams, Array, Array]:
         """
         Compute amplitude and phase for all modes: (2,2) and higher modes.
 
@@ -241,12 +241,12 @@ class IMRPhenomTHM:
         ----------
         times : Array
             Time array.
-        dparams : DerivedParams
-            Derived parameters of the binary.
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
 
         Returns
         -------
-        dparams : DerivedParams
+        wf_params : WaveformParams
             Updated derived parameters.
         all_amplitudes : Array
             Amplitude arrays for all modes, shape (Nmodes, Ntimes).
@@ -254,12 +254,14 @@ class IMRPhenomTHM:
             Phase arrays for all modes, shape (Nmodes, Ntimes).
         """
 
-        dparams, amplitude_22, phase_22, phase_coeffs_22 = self._compute_h22(times, dparams, return_coeffs=True)  # type: ignore
+        wf_params, amplitude_22, phase_22, phase_coeffs_22 = self._compute_h22(times, wf_params, return_coeffs=True)  # type: ignore
 
-        equal_black_holes = check_equal_bhs(dparams.eta, dparams.chi1, dparams.chi2)
+        equal_black_holes = check_equal_bhs(
+            wf_params.m1, wf_params.m2, wf_params.chi1, wf_params.chi2
+        )
 
         amplitude_hms, phase_hms = jax.vmap(
-            lambda mode: self._compute_hm(mode, times, dparams, phase_coeffs_22[0], phase_22, equal_black_holes)  # type: ignore
+            lambda mode: self._compute_hm(mode, times, wf_params, phase_coeffs_22[0], phase_22, equal_black_holes)  # type: ignore
         )(self.higher_modes)
 
         # now stack 22 with hms
@@ -270,7 +272,7 @@ class IMRPhenomTHM:
             [phase_22, phase_hms], axis=0
         )  # shape (Nmodes, Ntimes)
 
-        return dparams, all_amplitudes, all_phases
+        return wf_params, all_amplitudes, all_phases
 
     @jax.jit
     def combine_amp_phase(self, amplitudes: Array, phases: Array) -> Array:
@@ -294,8 +296,8 @@ class IMRPhenomTHM:
     def generate_hlms(
         self,
         times: Array,
-        dparams: DerivedParams,
-    ) -> tuple[DerivedParams, Array]:
+        wf_params: WaveformParams,
+    ) -> tuple[WaveformParams, Array]:
         """
         Generate complex strain h_lm for all modes.
 
@@ -303,17 +305,17 @@ class IMRPhenomTHM:
         ----------
         times : Array
             Time array.
-        dparams : DerivedParams
-            Derived parameters of the binary.
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
 
         Returns
         -------
-        dparams : DerivedParams
+        wf_params : WaveformParams
             Updated derived parameters.
         h_modes : Array
             Complex strain arrays for all modes, shape (Nmodes, Ntimes).
         """
-        dparams, amplitudes, phases = self.compute_amp_phase(times, dparams)  # type: ignore
+        wf_params, amplitudes, phases = self.compute_amp_phase(times, wf_params)  # type: ignore
         h_lm = self.combine_amp_phase(amplitudes, phases)
 
         # build return array with negative modes if needed
@@ -321,13 +323,13 @@ class IMRPhenomTHM:
             h_lmm = (-1) ** self.negative_ls[:, None] * jnp.conj(h_lm)
             h_lm = jnp.concatenate([h_lm, h_lmm], axis=0)
 
-        return dparams, h_lm
+        return wf_params, h_lm
 
     def generate_polarizations(
         self,
         times: Array,
-        dparams: DerivedParams,
-    ) -> tuple[DerivedParams, Array, Array]:
+        wf_params: WaveformParams,
+    ) -> tuple[WaveformParams, Array, Array]:
         """
         Generate plus and cross polarizations from the computed modes.
 
@@ -335,27 +337,27 @@ class IMRPhenomTHM:
         ----------
         times : Array
             Time array.
-        dparams : DerivedParams
-            Derived parameters of the binary.
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
 
         Returns
         -------
-        dparams : DerivedParams
+        wf_params : WaveformParams
             Updated derived parameters.
         h_plus : Array
             Plus polarization strain.
         h_cross : Array
             Cross polarization strain.
         """
-        dparams, h_lms = self.generate_hlms(times, dparams)
+        wf_params, h_lms = self.generate_hlms(times, wf_params)
 
         y_lms = spin_weighted_spherical_harmonic_all_modes(
-            dparams.inclination, jnp.pi / 2.0 - dparams.phi_ref, self.ells, self.mms
+            wf_params.inclination, jnp.pi / 2.0 - wf_params.phi_ref, self.ells, self.mms
         )
         if self.include_negative_modes:
             y_lmms = spin_weighted_spherical_harmonic_all_modes(
-                dparams.inclination,
-                jnp.pi / 2.0 - dparams.phi_ref,
+                wf_params.inclination,
+                jnp.pi / 2.0 - wf_params.phi_ref,
                 self.negative_ls,
                 self.negative_mms,
             )
@@ -365,13 +367,13 @@ class IMRPhenomTHM:
         h_plus = jnp.real(strain)
         h_cross = -jnp.imag(strain)
 
-        h_plus, h_cross = self.rotate_by_polarization(h_plus, h_cross, dparams.psi)
+        h_plus, h_cross = self.rotate_by_polarization(h_plus, h_cross, wf_params.psi)
 
         return (
-            dparams,
+            wf_params,
             h_plus,
             h_cross,
-        )  # todo: understand what to do with time array and dparams return
+        )  # todo: understand what to do with time array and wf_params return
 
     @jax.jit
     def rotate_by_polarization(
@@ -422,7 +424,7 @@ class IMRPhenomTHM:
         delta_t: float | Array = 5.0,
         t_min: float | Array = jnp.nan,  # todo decide if here or in init
         t_ref: float | Array = jnp.nan,  # todo decide if here or in init
-    ) -> DerivedParams:
+    ) -> WaveformParams:
         """
         Process input parameters and compute derived parameters.
 
@@ -456,7 +458,7 @@ class IMRPhenomTHM:
             Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
         """
 
-        wf_params = WaveformParams(
+        wf_params = compute_waveform_params(
             m1=m1,
             m2=m2,
             s1z=chi1z,
@@ -467,12 +469,13 @@ class IMRPhenomTHM:
             psi=psi,
             f_ref=f_ref,
             f_min=f_min,
+            delta_t=delta_t,
+            t_min=t_min,
+            t_ref=t_ref,
+            t_low=self.t_low,
         )
 
-        Dparams = compute_derived_params(
-            wf_params, delta_t=delta_t, t_low=self.t_low, t_min=t_min, t_ref=t_ref
-        )
-        return Dparams
+        return wf_params
 
 
 if __name__ == "__main__":

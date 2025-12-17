@@ -5,6 +5,10 @@ JAX configuration for phentax.
 
 This module configures JAX for gravitational waveform computations,
 enabling float64 precision by default and providing platform controls.
+
+.. autosummary::
+    configure_jax
+    setup_logging
 """
 
 import logging

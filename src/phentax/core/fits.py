@@ -2,14 +2,33 @@
 # SPDX-License-Identifier: MIT
 """
 Parameter space fits for IMRPhenomT(HM).
+============================
 
 Contains calibrated fits for collocation points, ringdown frequencies,
 final spin/mass, and other quantities. All functions are JAX-compatible.
+
+.. autosummary::
+    :toctree: _autosummary
+    final_mass_2017
+    final_spin_2017
+    fring
+    fdamp
+    fdamp_n2
+    inspiral_t0
+    inspiral_freq_cp
+    inspiral_amp_cp
+    intermediate_freq_cp1
+    peak_freq
+    rd_freq_d2
+    rd_freq_d3
+    intermediate_amp_cp1
+    peak_amp
+    rd_amp_c3
+    tshift
 """
 
 
 import jax
-import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array
 
@@ -823,8 +842,6 @@ def inspiral_t0(
 # =============================================================================
 # Inspiral frequency collocation points
 # =============================================================================
-# Inspiral frequency collocation points
-# =============================================================================
 
 
 @jax.jit
@@ -1217,7 +1234,7 @@ def inspiral_freq_cp(
     )
 
 
-# Keep legacy mode-specific functions that call the new unified function
+# Keep legacy mode-specific functions that call the new unified function #todo clean
 @jax.jit
 def inspiral_freq_cp_22(
     eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
@@ -2620,24 +2637,6 @@ def peak_freq_20(
     return peak_freq_22(eta, s1z, s2z)
 
 
-# @jax.jit
-# def peak_freq(mode: int, eta: float | Array, s1z: float | Array, s2z: float | Array) -> float | Array:
-#     """Peak frequency for given mode."""
-
-#     return lax.select(
-#         [mode == 20, mode == 21, mode == 22, mode == 33, mode == 44, mode == 55],
-#         [
-#             peak_freq_22(eta, s1z, s2z),  # 20 uses 22
-#             peak_freq_21(eta, s1z, s2z),
-#             peak_freq_22(eta, s1z, s2z),
-#             peak_freq_33(eta, s1z, s2z),
-#             peak_freq_44(eta, s1z, s2z),
-#             peak_freq_55(eta, s1z, s2z),
-#         ],
-#         default=peak_freq_22(eta, s1z, s2z)
-#     )
-
-
 # =============================================================================
 # Ringdown frequency derivatives (D2, D3)
 # =============================================================================
@@ -2940,59 +2939,6 @@ def rd_freq_d3_20(
 
 
 # =============================================================================
-# Legacy amplitude fits: Inspiral collocation points (now call unified function)
-# =============================================================================
-
-
-@jax.jit
-def inspiral_amp_cp_22(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 22 mode."""
-    return inspiral_amp_cp(eta, s1z, s2z, 22, idx)
-
-
-@jax.jit
-def inspiral_amp_cp_21(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 21 mode."""
-    return inspiral_amp_cp(eta, s1z, s2z, 21, idx)
-
-
-@jax.jit
-def inspiral_amp_cp_33(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 33 mode."""
-    return inspiral_amp_cp(eta, s1z, s2z, 33, idx)
-
-
-@jax.jit
-def inspiral_amp_cp_44(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 44 mode."""
-    return inspiral_amp_cp(eta, s1z, s2z, 44, idx)
-
-
-@jax.jit
-def inspiral_amp_cp_55(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 55 mode."""
-    return inspiral_amp_cp(eta, s1z, s2z, 55, idx)
-
-
-@jax.jit
-def inspiral_amp_cp_20(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, idx: int = 1
-) -> float | Array:
-    """Inspiral amplitude collocation point for 20 mode (use same as 22)."""
-    return inspiral_amp_cp(eta, s1z, s2z, 22, idx)
-
-
-# =============================================================================
 # Amplitude fits: Intermediate collocation points
 # =============================================================================
 
@@ -3240,188 +3186,6 @@ def intermediate_amp_cp1(
     )
 
     return lax.switch(mode_idx, [_fit_22, _fit_21, _fit_33, _fit_44, _fit_55])
-
-
-# Legacy wrapper functions for backward compatibility
-@jax.jit
-def intermediate_amp_cp1_22(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 22 mode (legacy wrapper)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 22)
-
-
-@jax.jit
-def intermediate_amp_cp1_21(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 21 mode (legacy wrapper)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 21)
-
-
-@jax.jit
-def intermediate_amp_cp1_33(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 33 mode (legacy wrapper)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 33)
-
-
-@jax.jit
-def intermediate_amp_cp1_44(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 44 mode (legacy wrapper)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 44)
-
-
-@jax.jit
-def intermediate_amp_cp1_55(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 55 mode (legacy wrapper)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 55)
-
-
-@jax.jit
-def intermediate_amp_cp1_20(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 1 for 20 mode (use same as 22)."""
-    return intermediate_amp_cp1(eta, s1z, s2z, 22)
-
-
-# NOTE: intermediate_amp_cp2_* functions are deprecated.
-# phenomxpy only has Intermediate_Amp_CP1, no CP2 functions.
-# These are kept for backward compatibility but should not be used.
-@jax.jit
-def intermediate_amp_cp2_22(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """DEPRECATED: Intermediate amplitude collocation point 2 for 22 mode."""
-    delta = (1.0 - 4.0 * eta) ** 0.5
-    chi1 = s1z
-    chi2 = s2z
-    eta2 = eta * eta
-    eta3 = eta2 * eta
-
-    chi_eff = (chi1 + chi2) / 2.0 + (chi1 - chi2) / 2.0 * delta / (1.0 - 2.0 * eta)
-    chi_eff2 = chi_eff * chi_eff
-
-    return (
-        1.0
-        - 5.47619 * eta
-        + 14.7626 * eta * chi_eff
-        + 47.3679 * eta2
-        - 178.609 * eta2 * chi_eff
-        + 34.9569 * eta2 * chi_eff2
-        - 245.396 * eta3
-        + 720.989 * eta3 * chi_eff
-    )
-
-
-@jax.jit
-def intermediate_amp_cp2_21(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 2 for 21 mode."""
-    delta = (1.0 - 4.0 * eta) ** 0.5
-    chi1 = s1z
-    chi2 = s2z
-    eta2 = eta * eta
-    eta3 = eta2 * eta
-
-    chi_eff = (chi1 + chi2) / 2.0 + (chi1 - chi2) / 2.0 * delta / (1.0 - 2.0 * eta)
-
-    return (
-        1.0
-        - 2.09152 * eta
-        + 5.65588 * eta * chi_eff
-        + 9.31108 * eta2
-        - 51.1412 * eta2 * chi_eff
-        - 90.4499 * eta3
-        + 272.188 * eta3 * chi_eff
-    )
-
-
-@jax.jit
-def intermediate_amp_cp2_33(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 2 for 33 mode."""
-    delta = (1.0 - 4.0 * eta) ** 0.5
-    chi1 = s1z
-    chi2 = s2z
-    eta2 = eta * eta
-    eta3 = eta2 * eta
-
-    chi_eff = (chi1 + chi2) / 2.0 + (chi1 - chi2) / 2.0 * delta / (1.0 - 2.0 * eta)
-
-    return (
-        1.0
-        - 2.65972 * eta
-        + 5.77898 * eta * chi_eff
-        + 6.35308 * eta2
-        - 51.1588 * eta2 * chi_eff
-        - 30.5015 * eta3
-        + 294.976 * eta3 * chi_eff
-    )
-
-
-@jax.jit
-def intermediate_amp_cp2_44(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 2 for 44 mode."""
-    delta = (1.0 - 4.0 * eta) ** 0.5
-    chi1 = s1z
-    chi2 = s2z
-    eta2 = eta * eta
-    eta3 = eta2 * eta
-
-    chi_eff = (chi1 + chi2) / 2.0 + (chi1 - chi2) / 2.0 * delta / (1.0 - 2.0 * eta)
-
-    return (
-        1.0
-        - 2.23991 * eta
-        + 4.07197 * eta * chi_eff
-        + 1.47109 * eta2
-        - 30.6252 * eta2 * chi_eff
-        - 7.19814 * eta3
-        + 165.451 * eta3 * chi_eff
-    )
-
-
-@jax.jit
-def intermediate_amp_cp2_55(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 2 for 55 mode."""
-    delta = (1.0 - 4.0 * eta) ** 0.5
-    chi1 = s1z
-    chi2 = s2z
-    eta2 = eta * eta
-    eta3 = eta2 * eta
-
-    chi_eff = (chi1 + chi2) / 2.0 + (chi1 - chi2) / 2.0 * delta / (1.0 - 2.0 * eta)
-
-    return (
-        1.0
-        - 1.61403 * eta
-        + 3.19315 * eta * chi_eff
-        - 5.60252 * eta2
-        - 21.1135 * eta2 * chi_eff
-        + 18.6203 * eta3
-        + 117.118 * eta3 * chi_eff
-    )
-
-
-@jax.jit
-def intermediate_amp_cp2_20(
-    eta: float | Array, s1z: float | Array, s2z: float | Array
-) -> float | Array:
-    """Intermediate amplitude collocation point 2 for 20 mode (use same as 22)."""
-    return intermediate_amp_cp2_22(eta, s1z, s2z)
 
 
 # =============================================================================
@@ -4189,31 +3953,6 @@ def fdamp_n2(af: float | Array, mode: int | Array) -> float | Array:
     )
 
 
-# NOTE: intermediate_freq_cp1 is now defined earlier in the file with exact phenomxpy formulas
-
-
-def intermediate_freq_cp2(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, mode: int | Array
-) -> float | Array:
-    """DEPRECATED: Intermediate frequency collocation point 2 for given mode.
-
-    NOTE: phenomxpy does not have CP2 intermediate functions.
-    This is kept for backward compatibility only.
-    """
-    return _mode_switch_3arg(
-        eta,
-        s1z,
-        s2z,
-        mode,
-        intermediate_freq_cp2_20,
-        intermediate_freq_cp2_21,
-        intermediate_freq_cp2_22,
-        intermediate_freq_cp2_33,
-        intermediate_freq_cp2_44,
-        intermediate_freq_cp2_55,
-    )
-
-
 def peak_freq(
     eta: float | Array, s1z: float | Array, s2z: float | Array, mode: int | Array
 ) -> float | Array:
@@ -4265,31 +4004,6 @@ def rd_freq_d3(
         rd_freq_d3_33,
         rd_freq_d3_44,
         rd_freq_d3_55,
-    )
-
-
-# NOTE: intermediate_amp_cp1 is now defined earlier in the file with exact phenomxpy formulas
-
-
-def intermediate_amp_cp2(
-    eta: float | Array, s1z: float | Array, s2z: float | Array, mode: int | Array
-) -> float | Array:
-    """DEPRECATED: Intermediate amplitude collocation point 2 for given mode.
-
-    NOTE: phenomxpy does not have CP2 intermediate functions.
-    This is kept for backward compatibility only.
-    """
-    return _mode_switch_3arg(
-        eta,
-        s1z,
-        s2z,
-        mode,
-        intermediate_amp_cp2_20,
-        intermediate_amp_cp2_21,
-        intermediate_amp_cp2_22,
-        intermediate_amp_cp2_33,
-        intermediate_amp_cp2_44,
-        intermediate_amp_cp2_55,
     )
 
 

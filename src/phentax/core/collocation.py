@@ -1,21 +1,30 @@
 # Copyright (C) 2025 Alessandro Santini
 # SPDX-License-Identifier: MIT
 """
+Collocation
+============================
 Collocation point methods for pseudo-PN coefficient computation.
 
 This module implements the linear system solving to compute pseudo-PN coefficients
 that augment the Post-Newtonian expansion to match numerical relativity fits.
-"""
 
+.. autosummary::
+   :toctree: _autosummary
+    OmegaPseudoPNCoeffs
+    AmpPseudoPNCoeffs
+    compute_omega_collocation_points
+    compute_omega_pseudo_pn_coeffs
+    compute_amp_collocation_points
+"""
 from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
-
-jax.config.update("jax_enable_x64", True)
+from jaxtyping import Array
 
 from . import fits
+
+jax.config.update("jax_enable_x64", True)
 
 
 class OmegaPseudoPNCoeffs(NamedTuple):
