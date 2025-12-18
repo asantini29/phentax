@@ -851,23 +851,18 @@ def _solve_inspiral_amplitude_system(
     B = (1.0 / fac0 / xx) * (amp_vals - amp_offsets)
 
     # Matrix
-    # c1 x^4 + c2 x^4.5 + c3 x^5
-    matrix = jnp.zeros((3, 3))
+    # # c1 x^4 + c2 x^4.5 + c3 x^5
+    row_0 = jnp.array([xx4[0], xx4[0] * xxhalf[0], xx4[0] * xx[0]])
+    row_1 = jnp.array([xx4[1], xx4[1] * xxhalf[1], xx4[1] * xx[1]])
+    row_2 = jnp.array([xx4[2], xx4[2] * xxhalf[2], xx4[2] * xx[2]])
 
-    # Row 0
-    matrix = matrix.at[0, 0].set(xx4[0])
-    matrix = matrix.at[0, 1].set(xx4[0] * xxhalf[0])
-    matrix = matrix.at[0, 2].set(xx4[0] * xx[0])
-
-    # Row 1
-    matrix = matrix.at[1, 0].set(xx4[1])
-    matrix = matrix.at[1, 1].set(xx4[1] * xxhalf[1])
-    matrix = matrix.at[1, 2].set(xx4[1] * xx[1])
-
-    # Row 2
-    matrix = matrix.at[2, 0].set(xx4[2])
-    matrix = matrix.at[2, 1].set(xx4[2] * xxhalf[2])
-    matrix = matrix.at[2, 2].set(xx4[2] * xx[2])
+    matrix = jnp.array(
+        [
+            row_0,
+            row_1,
+            row_2,
+        ]
+    )
 
     solution = jnp.linalg.solve(matrix, B)
 
@@ -1060,33 +1055,20 @@ def _solve_intermediate_amplitude_system(
     sech1 = 1.0 / jnp.cosh(phi)
     sech2 = 1.0 / jnp.cosh(phi2)
 
-    matrix = jnp.zeros((4, 4))
-    B = jnp.zeros(4)
-
     # Row 0: Match amplitude at tCut
-    matrix = matrix.at[0, 0].set(1.0)
-    matrix = matrix.at[0, 1].set(sech1)
-    matrix = matrix.at[0, 2].set(jnp.power(sech2, 1.0 / 7.0))
-    matrix = matrix.at[0, 3].set((tCut - tshift) ** 2)
-    B = B.at[0].set(ampinsp)
+    row_0 = jnp.array([1.0, sech1, jnp.power(sech2, 1.0 / 7.0), (tCut - tshift) ** 2])
 
     # Row 1: Match amplitude at tcpMerger
     phib = alpha1RD * (tcpMerger - tshift)
     sech1b = 1.0 / jnp.cosh(phib)
     sech2b = 1.0 / jnp.cosh(2.0 * phib)
 
-    matrix = matrix.at[1, 0].set(1.0)
-    matrix = matrix.at[1, 1].set(sech1b)
-    matrix = matrix.at[1, 2].set(jnp.power(sech2b, 1.0 / 7.0))
-    matrix = matrix.at[1, 3].set((tcpMerger - tshift) ** 2)
-    B = B.at[1].set(ampMergerCP1)
+    row_1 = jnp.array(
+        [1.0, sech1b, jnp.power(sech2b, 1.0 / 7.0), (tcpMerger - tshift) ** 2]
+    )
 
     # Row 2: Match amplitude at peak (t=tshift)
-    matrix = matrix.at[2, 0].set(1.0)
-    matrix = matrix.at[2, 1].set(1.0)
-    matrix = matrix.at[2, 2].set(1.0)
-    matrix = matrix.at[2, 3].set(0.0)
-    B = B.at[2].set(ampPeak)
+    row_2 = jnp.ones(4)
 
     # Row 3: Match derivative at tCut
     dampMECO = jnp.copysign(1.0, jnp.real(ampinsp_cplx)) * _der_complex_amp_orientation(
@@ -1100,12 +1082,11 @@ def _solve_intermediate_amplitude_system(
     aux2 = (-2.0 / 7.0) * alpha1RD * sinh * jnp.power(sech2, 8.0 / 7.0)
     aux3 = 2.0 * (tCut - tshift)
 
-    matrix = matrix.at[3, 0].set(0.0)
-    matrix = matrix.at[3, 1].set(aux1)
-    matrix = matrix.at[3, 2].set(aux2)
-    matrix = matrix.at[3, 3].set(aux3)
-    B = B.at[3].set(dampMECO)
+    row_3 = jnp.array([0.0, aux1, aux2, aux3])
 
+    matrix = jnp.array([row_0, row_1, row_2, row_3])
+
+    B = jnp.array([ampinsp, ampMergerCP1, ampPeak, dampMECO])
     solution = jnp.linalg.solve(matrix, B)
 
     return solution[0], solution[1], solution[2], solution[3], dampMECO

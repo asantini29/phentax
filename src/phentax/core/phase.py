@@ -420,7 +420,12 @@ def compute_phase_coeffs_22(
 
     def _compute_min(_):
         return get_time_of_frequency(
-            wf_params.Mf_min, wf_params.eta, PhaseCoeffs22, wf_params.t_low
+            wf_params.Mf_min,
+            wf_params.eta,
+            PhaseCoeffs22,
+            wf_params.t_low,
+            wf_params.atol,
+            wf_params.rtol,
         )
 
     def _use_existing_min(_):
@@ -431,9 +436,28 @@ def compute_phase_coeffs_22(
         jnp.isnan(wf_params.Mt_min), _compute_min, _use_existing_min, operand=None
     )
 
+    # check here if fmin and fref are the same to avoid a second root solving
+
+    _Mt_ref = jax.lax.cond(
+        jnp.isnan(wf_params.Mt_ref),
+        lambda: jax.lax.cond(
+            wf_params.Mf_min == wf_params.Mf_ref,
+            lambda: _Mt_min,
+            lambda: wf_params.Mt_ref,
+        ),
+        lambda: wf_params.Mt_ref,
+    )
+
+    wf_params = wf_params._replace(Mt_ref=_Mt_ref)
+
     def _compute_ref(_):
         return get_time_of_frequency(
-            wf_params.Mf_ref, wf_params.eta, PhaseCoeffs22, wf_params.t_low
+            wf_params.Mf_ref,
+            wf_params.eta,
+            PhaseCoeffs22,
+            wf_params.t_low,
+            wf_params.atol,
+            wf_params.rtol,
         )
 
     def _use_existing_ref(_):
@@ -441,7 +465,7 @@ def compute_phase_coeffs_22(
 
     # This works inside vmap because isnan returns a boolean tracer
     _Mt_ref = jax.lax.cond(
-        jnp.isnan(wf_params.Mt_ref), _compute_ref, _use_existing_ref, operand=None
+        jnp.isnan(_Mt_ref), _compute_ref, _use_existing_ref, operand=None
     )
 
     wf_params = wf_params._replace(Mt_min=_Mt_min)
@@ -795,6 +819,8 @@ def get_time_of_frequency(
     phase_coeffs: PhaseCoeffs,
     t_low: float | Array = 0.0,
     t_high: float | Array = 500.0,
+    atol: float = 1e-12,
+    rtol: float = 1e-12,
 ) -> float | Array:
     """
     Get time corresponding to a given frequency using root finding.
@@ -811,11 +837,15 @@ def get_time_of_frequency(
         Lower bound for the time search (default is 0.0. In this case, it is adjusted based on the frequency).
     t_high : float | Array, optional
         Upper bound for the time search (default is 500.0).
+    atol : float | Array, optional
+        Absolute Bisection tolerance
+    rtol : float | Array, optional
+        Relative bisection tolerance
     """
 
     t_low = jax.lax.cond(
         t_low == 0,
-        lambda: -0.012 * freq ** (-2.7),
+        lambda: -0.015 * freq ** (-2.7),  # enlarging this a bit
         lambda: t_low,
         # t_low,
     )
@@ -831,8 +861,8 @@ def get_time_of_frequency(
         return 2 * jnp.pi * freq - omega
 
     solver = optx.Bisection(  # type: ignore
-        atol=1e-12,
-        rtol=1e-12,
+        atol=atol,
+        rtol=rtol,
     )
     time_root: optx.Solution = optx.root_find(
         time_of_freq,
@@ -1071,30 +1101,32 @@ def _solve_intermediate_omega_system(
     dencut = jnp.sqrt(1.0 + tCut * tCut * alpha1RD * alpha1RD)
 
     # Build matrix and RHS
-    matrix = jnp.zeros((3, 3))
-    B = jnp.zeros(3)
 
-    # Row 0: omega at tCut
-    B = B.at[0].set(
-        omegaCutBar - (1.0 - omegaPeak / omegaRING) - (domegaPeak / alpha1RD) * ascut
+    B = jnp.array(
+        [
+            omegaCutBar
+            - (1.0 - omegaPeak / omegaRING)
+            - (domegaPeak / alpha1RD) * ascut,
+            omegaMergerCP
+            - (1.0 - omegaPeak / omegaRING)
+            - (domegaPeak / alpha1RD) * bascut,
+            domegaCut - domegaPeak / dencut,
+        ]
     )
-    matrix = matrix.at[0, 0].set(ascut2)
-    matrix = matrix.at[0, 1].set(ascut3)
-    matrix = matrix.at[0, 2].set(ascut4)
 
-    # Row 1: omega at tcpMerger
-    B = B.at[1].set(
-        omegaMergerCP - (1.0 - omegaPeak / omegaRING) - (domegaPeak / alpha1RD) * bascut
+    matrix = jnp.array(
+        [
+            jnp.array([ascut2, ascut3, ascut4]),
+            jnp.array([bascut2, bascut3, bascut4]),
+            jnp.array(
+                [
+                    2.0 * alpha1RD * ascut / dencut,
+                    3.0 * alpha1RD * ascut2 / dencut,
+                    4.0 * alpha1RD * ascut3 / dencut,
+                ]
+            ),
+        ]
     )
-    matrix = matrix.at[1, 0].set(bascut2)
-    matrix = matrix.at[1, 1].set(bascut3)
-    matrix = matrix.at[1, 2].set(bascut4)
-
-    # Row 2: derivative at tCut
-    B = B.at[2].set(domegaCut - domegaPeak / dencut)
-    matrix = matrix.at[2, 0].set(2.0 * alpha1RD * ascut / dencut)
-    matrix = matrix.at[2, 1].set(3.0 * alpha1RD * ascut2 / dencut)
-    matrix = matrix.at[2, 2].set(4.0 * alpha1RD * ascut3 / dencut)
 
     # Solve
     solution = jnp.linalg.solve(matrix, B)
