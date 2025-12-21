@@ -10,8 +10,9 @@ This module implements the pPhase class functionality from phenomxpy,
 computing all the coefficients needed for the IMR omega and phase ansatze.
 """
 
-from typing import NamedTuple, Tuple
+from typing import Tuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
@@ -24,7 +25,7 @@ from .internals import WaveformParams, compute_wf_length_params
 jax.config.update("jax_enable_x64", True)
 
 
-class PhaseCoeffs(NamedTuple):
+class PhaseCoeffs(eqx.Module):
     """
     All phase/omega coefficients for a given mode.
 
@@ -431,7 +432,8 @@ def compute_phase_coeffs_22(
         jnp.isnan(wf_params.Mt_min), _compute_min, _use_existing_min, operand=None
     )
 
-    wf_params = wf_params._replace(Mt_min=_Mt_min)
+    # wf_params = wf_params._replace(Mt_min=_Mt_min)
+    wf_params = eqx.tree_at(lambda p: p.Mt_min, wf_params, _Mt_min)
 
     # check here if fmin and fref are the same to avoid a second root solving
     _Mt_ref = jax.lax.cond(
@@ -444,7 +446,8 @@ def compute_phase_coeffs_22(
         lambda: wf_params.Mt_ref,
     )
 
-    wf_params = wf_params._replace(Mt_ref=_Mt_ref)
+    # wf_params = wf_params._replace(Mt_ref=_Mt_ref)
+    wf_params = eqx.tree_at(lambda p: p.Mt_ref, wf_params, _Mt_ref)
 
     def _compute_ref(_):
         return get_time_of_frequency(
@@ -464,13 +467,15 @@ def compute_phase_coeffs_22(
         jnp.isnan(_Mt_ref), _compute_ref, _use_existing_ref, operand=None
     )
 
-    wf_params = wf_params._replace(Mt_ref=_Mt_ref)
+    # wf_params = wf_params._replace(Mt_ref=_Mt_ref)
+    wf_params = eqx.tree_at(lambda p: p.Mt_ref, wf_params, _Mt_ref)
+
     wf_params = compute_wf_length_params(
         wf_params
     )  # compute waveform length parameters based on Mt_min
     phiref0 = imr_phase(_Mt_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
     # phiref0 = imr_phase(wf_params.t_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
-    return wf_params, PhaseCoeffs22._replace(phiref0=phiref0)
+    return wf_params, eqx.tree_at(lambda p: p.phiref0, PhaseCoeffs22, phiref0)
 
 
 @jax.jit

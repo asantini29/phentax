@@ -14,14 +14,14 @@ References:
 - Amplitude PN: Eq. 9.4 Blanchet 2008, Eq. 43 Faye 2012, Eq. 4.17 Arun, Eq. 4.27 Buonanno
 """
 
-from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
 
-class OmegaPNCoeffs(NamedTuple):
+class OmegaPNCoeffs(eqx.Module):
     """TaylorT3 omega PN coefficients (up to 3.5PN)."""
 
     omega1PN: float | Array
@@ -32,7 +32,7 @@ class OmegaPNCoeffs(NamedTuple):
     omega3halfPN: float | Array
 
 
-class AmpPNCoeffs(NamedTuple):
+class AmpPNCoeffs(eqx.Module):
     """Amplitude PN coefficients for a specific mode."""
 
     # Real part coefficients
