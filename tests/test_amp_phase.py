@@ -13,7 +13,7 @@ from phentax.core.amplitude import (
     compute_amplitude_coeffs_hm,
     imr_amplitude,
 )
-from phentax.core.internals import WaveformParams, compute_waveform_params
+from phentax.core.internals import compute_waveform_params
 from phentax.core.phase import (
     compute_phase_coeffs_22,
     compute_phase_coeffs_hm,
@@ -155,7 +155,7 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
             xpy_amp_coeffs[str(mode)] = None
 
     # Plotting
-    times = jnp.linspace(-200, 100, 1000)
+    times = jnp.linspace(-200, 500, 1000)
     times_np = np.asarray(times)
 
     fig, axs = plt.subplots(3, 1, figsize=(16, 21))
@@ -207,7 +207,10 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
         axs[2].plot(times, jnp.abs(_amp_xpy), "--", label=f"XPY {mode}")
 
         # breakpoint()
-        amp_check = np.isclose(jnp.abs(_amp_tax), jnp.abs(_amp_xpy)).all()
+        amp_check = (
+            np.isclose(jnp.real(_amp_tax), jnp.real(_amp_xpy)).all()
+            and np.isclose(jnp.imag(_amp_tax), jnp.imag(_amp_xpy)).all()
+        )
 
         phase_check = np.isclose(_phase_tax, _phase_xpy).all()
 

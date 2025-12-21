@@ -16,6 +16,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+jax.config.update("jax_enable_x64", True)
+
 
 @jax.jit
 def spin_weighted_spherical_harmonic(
@@ -58,6 +60,8 @@ def spin_weighted_spherical_harmonic(
 
     # Precompute trigonometric functions
     c = jnp.cos(theta)
+    c_2 = jnp.cos(theta / 2)
+    s_2 = jnp.sin(theta / 2)
     s = jnp.sin(theta)
 
     # Define branches as lambdas to delay execution (only the selected one runs)
@@ -99,16 +103,18 @@ def spin_weighted_spherical_harmonic(
         return -sqrt_35_128pi * (1 - c) * (1 + 3 * c + 4 * c**2) * s / (1 - c + 1e-30)
 
     def _44():
-        return 3 * sqrt_7_128pi * (1 + c) ** 2 * s**2
+        return (
+            3.0 * jnp.sqrt(7.0 / jnp.pi) * jnp.power(c_2, 6.0) * jnp.power(s_2, 2.0)
+        )  # 3 * sqrt_7_128pi * (1 + c) ** 2 * s**2
 
     def _4m4():
-        return 3 * sqrt_7_128pi * (1 - c) ** 2 * s**2
+        return 3.0 * jnp.sqrt(7.0 / jnp.pi) * jnp.power(s_2, 6.0) * jnp.power(c_2, 2.0)
 
     def _55():
-        return -sqrt_330_1024pi * (1 + c) ** 2 * s**3
+        return -jnp.sqrt(330.0 / jnp.pi) * jnp.power(c_2, 7.0) * jnp.power(s_2, 3.0)
 
     def _5m5():
-        return sqrt_330_1024pi * (1 - c) ** 2 * s**3
+        return jnp.sqrt(330.0 / jnp.pi) * jnp.power(c_2, 3.0) * jnp.power(s_2, 7.0)
 
     # Construct the switch table
     # Index = 10*ell + emm + 55
@@ -172,7 +178,7 @@ def spin_weighted_spherical_harmonic_all_modes(
         Array of spin-weighted spherical harmonics for each (ell, emm).
     """
     return jax.vmap(
-        spin_weighted_spherical_harmonic, in_axes=(None, None, 0, 0), out_axes=0
+        spin_weighted_spherical_harmonic, in_axes=(None, None, 0, 0), out_axes=1
     )(theta, phi, ells, emms)
 
 

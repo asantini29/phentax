@@ -13,7 +13,7 @@ Internal data structures and coefficient computation for IMRPhenomT(HM).
    compute_time_grid
 """
 
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -73,7 +73,7 @@ class WaveformParams(NamedTuple):
         Final spin (dimensionless).
     M_sec : float | Array
         Total mass in seconds.
-    amp_0 : float | Array
+    amp_factor : float | Array
         Amplitude prefactor.
     Mf_min : float | Array
         Minimum frequency (dimensionless).
@@ -113,7 +113,7 @@ class WaveformParams(NamedTuple):
     Mf: float | Array  # Final mass (dimensionless)
     af: float | Array  # Final spin (dimensionless)
     M_sec: float | Array  # Total mass in seconds
-    amp_0: float | Array  # Amplitude prefactor
+    amp_factor: float | Array  # Amplitude prefactor
     Mf_min: float | Array  # Minimum frequency (dimensionless)
     Mf_ref: float | Array  # Reference frequency (dimensionless)
     Mdelta_t: float | Array  # Delta t in dimensionless units
@@ -123,6 +123,10 @@ class WaveformParams(NamedTuple):
     t_min: float | Array  # Start time (seconds), default None
     t_ref: float | Array  # Reference time (seconds), default None
     t_low: float | Array  # if 0, use fits for bisection edge. else use value.
+    atol: float | Array
+    rtol: float | Array
+    Mt_end: float | Array = 500  # end the waveform 500M after the peak
+    length: int | Array = 10000  # number of time steps in the waveform generation
 
 
 # =============================================================================
@@ -130,7 +134,8 @@ class WaveformParams(NamedTuple):
 # =============================================================================
 
 
-def compute_waveform_params(
+@jax.jit
+def _compute_waveform_params(
     m1: float | Array,  # Primary mass (M_sun)
     m2: float | Array,  # Secondary mass (M_sun)
     s1z: float | Array,  # Primary spin z-component (dimensionless)
@@ -145,6 +150,8 @@ def compute_waveform_params(
     t_min: float | Array = jnp.nan,
     t_ref: float | Array = jnp.nan,
     t_low: float | Array = 0.0,
+    atol: float | Array = 1e-12,
+    rtol: float | Array = 1e-12,
 ) -> WaveformParams:
     """
     Compute derived quantities from physical parameters.
@@ -195,7 +202,7 @@ def compute_waveform_params(
     # Amplitude prefactor: M / D
     # Convert distance from Mpc to meters
     D_m = distance * 1e6 * PC_SI
-    amp_0 = total_mass * MRSUN_SI / D_m
+    amp_factor = total_mass * MRSUN_SI / D_m
 
     return WaveformParams(
         m1=m1,
@@ -221,66 +228,159 @@ def compute_waveform_params(
         Mt_min=Mt_min,
         Mt_ref=Mt_ref,
         M_sec=M_sec,
-        amp_0=amp_0,
+        amp_factor=amp_factor,
         delta_t=delta_t,
         t_min=t_min,
         t_ref=t_ref,
         t_low=t_low,
+        atol=atol,
+        rtol=rtol,
     )
 
 
-# =============================================================================
-# Time grid generation
-# =============================================================================
-
-
-@jax.jit
-def compute_time_grid(
-    M_sec: float | Array,
-    f_min: float | Array,
-    dt: float | Array,
-    t_extra: float | Array = 500.0,
-) -> Tuple[jnp.ndarray, float | Array, float | Array]:
+def compute_waveform_params(
+    m1: float | Array,  # Primary mass (M_sun)
+    m2: float | Array,  # Secondary mass (M_sun)
+    s1z: float | Array,  # Primary spin z-component (dimensionless)
+    s2z: float | Array,  # Secondary spin z-component (dimensionless)
+    distance: float | Array,  # Luminosity distance (Mpc)
+    inclination: float | Array,  # Inclination angle (radians)
+    phi_ref: float | Array,  # Reference phase (radians)
+    psi: float | Array,  # Polarization angle (radians)
+    f_ref: float | Array,  # Reference frequency (Hz), or 0 for peak
+    f_min: float | Array,  # Minimum frequency (Hz)
+    delta_t: float | Array = 5.0,
+    t_min: float | Array = jnp.nan,
+    t_ref: float | Array = jnp.nan,
+    t_low: float | Array = 0.0,
+    atol: float | Array = 1e-12,
+    rtol: float | Array = 1e-12,
+) -> WaveformParams:
     """
-    Compute time grid for waveform generation.
+    Wrapper to compute derived waveform parameters.
 
     Parameters
     ----------
-    M_sec : float | Array
-        Total mass in seconds.
+    m1 : float | Array
+        Primary mass (M_sun).
+    m2 : float | Array
+        Secondary mass (M_sun).
+    s1z : float | Array
+        Primary spin z-component (dimensionless).
+    s2z : float | Array
+        Secondary spin z-component (dimensionless).
+    distance : float | Array
+        Luminosity distance (Mpc).
+    inclination : float | Array
+        Inclination angle (radians).
+    phi_ref : float | Array
+        Reference phase (radians).
+    psi : float | Array
+        Polarization angle (radians).
+    f_ref : float | Array
+        Reference frequency (Hz), or 0 for peak.
     f_min : float | Array
-        Starting frequency (Hz).
-    dt : float | Array
+        Minimum frequency (Hz).
+    delta_t : float | Array, default 5.0
         Time step (seconds).
-    t_extra : float | Array
-        Extra time after peak (in M).
+    t_min : float | Array, default jnp.nan
+        Start time (seconds).
+    t_ref : float | Array, default jnp.nan
+        Reference time (seconds).
+    t_low : float | Array, default 0.0
+        if 0, use fits for bisection edge. else use value.
+    atol : float | Array, optional
+        Absolute Bisection tolerance
+    rtol : float | Array, optional
+        Relative bisection tolerance
+    Returns
+    -------
+    WaveformParams
+        Derived waveform parameters.
+    """
+
+    if isinstance(m1, float):
+        return _compute_waveform_params(
+            m1,
+            m2,
+            s1z,
+            s2z,
+            distance,
+            inclination,
+            phi_ref,
+            psi,
+            f_ref,
+            f_min,
+            delta_t,
+            t_min,
+            t_ref,
+            t_low,
+            atol,
+            rtol,
+        )
+    else:
+        return jax.vmap(
+            _compute_waveform_params,
+            in_axes=(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            out_axes=0,
+        )(
+            m1,
+            m2,
+            s1z,
+            s2z,
+            distance,
+            inclination,
+            phi_ref,
+            psi,
+            f_ref,
+            f_min,
+            delta_t,
+            t_min,
+            t_ref,
+            t_low,
+            atol,
+            rtol,
+        )
+
+
+@jax.jit
+def compute_wf_length_params(
+    params: WaveformParams,
+) -> WaveformParams:
+    """
+    Compute waveform length parameters in dimensionless units.
+
+    Parameters
+    ----------
+    params : WaveformParams
+        Input physical parameters.
 
     Returns
     -------
-    times : array
-        Time array (in M, centered on peak at t=0).
-    t_start : float | Array
-        Start time.
-    n_points : int
-        Number of points.
+    WaveformParams
+        Updated waveform parameters with length parameters.
     """
-    # Convert f_min to dimensionless frequency
-    omega_min = 2.0 * jnp.pi * f_min * M_sec
 
-    # Estimate time to merger using Newtonian inspiral
-    # t ~ 5/256 * M / eta * v^(-8) where v = (M omega / 2)^(1/3)
-    # Simplified: t ~ (omega)^(-8/3)
-    t_inspiral = 5.0 / (256.0 * omega_min ** (8.0 / 3.0))
+    length_negative = (jnp.ceil(-params.Mt_min / params.Mdelta_t)).astype(int)
+    length_positive = (jnp.ceil(params.Mt_end / params.Mdelta_t)).astype(int)
+    total_length = length_negative + length_positive + 1  # +1 for the zero time
+    Mt_min = -length_negative * params.Mdelta_t
 
-    # Convert dt to dimensionless
-    dt_M = dt / M_sec
-
-    # Time grid (negative = before peak, positive = after)
-    t_start = -t_inspiral
-    t_end = t_extra
-
-    n_points = jnp.int32((t_end - t_start) / dt_M)
-
-    times = jnp.linspace(t_start, t_end, n_points)
-
-    return times, t_start, n_points
+    return params._replace(Mt_min=Mt_min, length=total_length)

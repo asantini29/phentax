@@ -428,11 +428,11 @@ def compute_amplitude_coeffs_22(
     tanhc3 = jnp.tanh(c3)
     coshc3 = jnp.cosh(c3)
 
-    limit = jnp.abs(0.5 * alpha1RD / tanhc3)
-    c2 = jnp.where(c2 > limit, -limit, c2)
+    limit = 0.5 * alpha1RD / tanhc3
+    c2 = jnp.where(c2 > jnp.abs(limit), -limit, c2)
 
-    limit_prec = jnp.abs(0.5 * alpha1RD_prec / tanhc3)
-    c2_prec = jnp.where(c2_prec > limit_prec, -limit_prec, c2_prec)
+    limit_prec = 0.5 * alpha1RD_prec / tanhc3
+    c2_prec = jnp.where(c2_prec > jnp.abs(limit_prec), -limit_prec, c2_prec)
 
     c1 = ampPeak * alpha1RD * coshc3 * coshc3 / c2
     c4 = ampPeak - c1 * tanhc3

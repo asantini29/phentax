@@ -24,7 +24,7 @@ import optimistix as optx
 from jaxtyping import Array
 
 from . import collocation, fits, pn_coeffs
-from .internals import WaveformParams
+from .internals import WaveformParams, compute_wf_length_params
 
 jax.config.update("jax_enable_x64", True)
 
@@ -436,13 +436,14 @@ def compute_phase_coeffs_22(
         jnp.isnan(wf_params.Mt_min), _compute_min, _use_existing_min, operand=None
     )
 
-    # check here if fmin and fref are the same to avoid a second root solving
+    wf_params = wf_params._replace(Mt_min=_Mt_min)
 
+    # check here if fmin and fref are the same to avoid a second root solving
     _Mt_ref = jax.lax.cond(
         jnp.isnan(wf_params.Mt_ref),
         lambda: jax.lax.cond(
             wf_params.Mf_min == wf_params.Mf_ref,
-            lambda: _Mt_min,
+            lambda: wf_params.Mt_min,
             lambda: wf_params.Mt_ref,
         ),
         lambda: wf_params.Mt_ref,
@@ -468,9 +469,10 @@ def compute_phase_coeffs_22(
         jnp.isnan(_Mt_ref), _compute_ref, _use_existing_ref, operand=None
     )
 
-    wf_params = wf_params._replace(Mt_min=_Mt_min)
     wf_params = wf_params._replace(Mt_ref=_Mt_ref)
-
+    wf_params = compute_wf_length_params(
+        wf_params
+    )  # compute waveform length parameters based on Mt_min
     phiref0 = imr_phase(_Mt_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
     # phiref0 = imr_phase(wf_params.t_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
     return wf_params, PhaseCoeffs22._replace(phiref0=phiref0)
