@@ -23,6 +23,7 @@ import jax.numpy as jnp
 import optimistix as optx
 from jaxtyping import Array
 
+from ..utils.utility import solve_3x3_explicit
 from . import collocation, fits, pn_coeffs
 from .internals import WaveformParams, compute_wf_length_params
 
@@ -654,8 +655,15 @@ def imr_omega(
         ]
     )
 
+    @jax.jit
     def _omega_scalar(t: Array) -> Array:
         """Compute omega at a single time t."""
+
+        is_post_inspiral = t >= phase_coeffs.inspiral_cut
+        is_ringdown = t >= phase_coeffs.ringdown_cut
+
+        # 0 if insp, 1 if interm, 2 if ringdown
+        region_idx = is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32)
 
         def _inspiral(t):
             return _inspiral_ansatz_omega_single(
@@ -688,13 +696,10 @@ def imr_omega(
                 phase_coeffs.omegaRING,
             )
 
-        def _post_inspiral(t):
-            return jax.lax.cond(
-                t < phase_coeffs.ringdown_cut, _intermediate, _ringdown, operand=t
-            )
-
-        return jax.lax.cond(
-            t < phase_coeffs.inspiral_cut, _inspiral, _post_inspiral, operand=t
+        return jax.lax.switch(
+            region_idx,
+            [_inspiral, _intermediate, _ringdown],
+            t,
         )
 
     # Vectorize over time array
@@ -741,7 +746,14 @@ def imr_phase(
 
     @jax.jit
     def _phase_scalar(t: Array, _phase_22: float | Array) -> Array:
-        # Define branch functions for jax.lax.cond
+        # Determine region index: 0=Inspiral, 1=Intermediate, 2=Ringdown
+        # Using boolean arithmetic is often faster than branching logic for indices
+        is_post_inspiral = t >= phase_coeffs.inspiral_cut
+        is_ringdown = t >= phase_coeffs.ringdown_cut
+
+        # 0 if insp, 1 if interm, 2 if ringdown
+        region_idx = is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32)
+
         def _inspiral(t, _phase_22):
             return _inspiral_ansatz_phase_value(
                 t,
@@ -754,8 +766,8 @@ def imr_phase(
                 phase_22=_phase_22,
             )
 
-        def _intermediate(t):
-            return _intermediate_ansatz_phase_value(
+        def _intermediate(t, _):
+            val = _intermediate_ansatz_phase_value(
                 t,
                 phase_coeffs.alpha1RD,
                 phase_coeffs.omegaMergerC1,
@@ -766,9 +778,10 @@ def imr_phase(
                 phase_coeffs.omegaRING,
                 phase_coeffs.phOffMerger,
             )
+            return val - phase_coeffs.phiCutPNAMP
 
-        def _ringdown(t):
-            return _ringdown_ansatz_phase_value(
+        def _ringdown(t, _):
+            val = _ringdown_ansatz_phase_value(
                 t,
                 phase_coeffs.c1_prec,
                 phase_coeffs.c2,
@@ -777,23 +790,12 @@ def imr_phase(
                 phase_coeffs.omegaRING_prec,
                 phase_coeffs.phOffRD,
             )
+            return val - phase_coeffs.phiCutPNAMP
 
-        def _post_inspiral(t):
-            return (
-                jax.lax.cond(
-                    t < phase_coeffs.ringdown_cut,
-                    _intermediate,
-                    _ringdown,
-                    t,
-                )
-                - phase_coeffs.phiCutPNAMP
-            )
-
-        # Use jax.lax.cond for safe branching (avoids NaNs in log(-t) for t>0)
-        return jax.lax.cond(
-            t < phase_coeffs.inspiral_cut,
-            lambda: _inspiral(t, _phase_22),
-            lambda: _post_inspiral(t),
+        # Use lax.switch which is cleaner than nested conds
+        # We need to pass _phase_22 to all, even if unused, to match signature
+        return jax.lax.switch(
+            region_idx, [_inspiral, _intermediate, _ringdown], t, _phase_22
         )
 
     # Vectorize over time array
@@ -849,7 +851,6 @@ def get_time_of_frequency(
         t_low == 0,
         lambda: -0.015 * freq ** (-2.7),  # enlarging this a bit
         lambda: t_low,
-        # t_low,
     )
 
     def time_of_freq(t, freq):
@@ -1131,7 +1132,7 @@ def _solve_intermediate_omega_system(
     )
 
     # Solve
-    solution = jnp.linalg.solve(matrix, B)
+    solution = solve_3x3_explicit(matrix, B)  # jnp.linalg.solve(matrix, B)
 
     return solution[0], solution[1], solution[2]
 

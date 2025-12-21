@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from ..utils.utility import solve_3x3_explicit
 from . import fits
 from .internals import WaveformParams
 from .phase import PhaseCoeffs, _inspiral_ansatz_domega, imr_omega
@@ -73,6 +74,7 @@ class AmplitudeCoeffs(NamedTuple):
     phiCutPNAMP: float | Array
 
 
+@jax.jit
 def _compute_pn_amplitude_coeffs(
     eta: float | Array,
     delta: float | Array,
@@ -659,6 +661,13 @@ def imr_amplitude(
     """
 
     def _amp_scalar(t: Array) -> Array:
+
+        is_post_inspiral = t >= amp_coeffs.inspiral_cut
+        is_ringdown = t >= amp_coeffs.ringdown_cut
+
+        # 0 if insp, 1 if interm, 2 if ringdown
+        region_idx = is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32)
+
         def _inspiral(t):
             # Need omega from 22 mode
             omega = imr_omega(t, eta, phase_coeffs_22)
@@ -696,12 +705,17 @@ def imr_amplitude(
                 amp_coeffs.tshift,
             )
 
-        def _post_inspiral(t):
-            return jax.lax.cond(
-                t < amp_coeffs.ringdown_cut, _intermediate, _ringdown, t
-            )
+        # def _post_inspiral(t):
+        #     return jax.lax.cond(
+        #         t < amp_coeffs.ringdown_cut, _intermediate, _ringdown, t
+        #     )
 
-        return jax.lax.cond(t < amp_coeffs.inspiral_cut, _inspiral, _post_inspiral, t)
+        # return jax.lax.cond(t < amp_coeffs.inspiral_cut, _inspiral, _post_inspiral, t)
+        return jax.lax.switch(
+            region_idx,
+            [_inspiral, _intermediate, _ringdown],
+            t,
+        )
 
     # Vectorize
     time = jnp.asarray(time)
@@ -864,7 +878,7 @@ def _solve_inspiral_amplitude_system(
         ]
     )
 
-    solution = jnp.linalg.solve(matrix, B)
+    solution = solve_3x3_explicit(matrix, B)  # jnp.linalg.solve(matrix, B)
 
     return solution[0], solution[1], solution[2]
 

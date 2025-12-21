@@ -372,3 +372,58 @@ def mode_to_int(ell: int, emm: int) -> int:
         Integer key: 10*ell + |m| for positive m modes.
     """
     return 10 * ell + abs(emm)
+
+
+@jax.jit
+def solve_3x3_explicit(A: Array, b: Array) -> Array:
+    """
+    Solves Ax = b for 3x3 matrix A using Cramer's rule / explicit inverse.
+    Much faster than jnp.linalg.solve for small matrices on GPU inside vmap.
+
+    Parameters
+    ----------
+    A : Array
+        Coefficient matrix of shape (3, 3).
+    b : Array
+        Right-hand side vector of shape (3,).
+    Returns
+    -------
+    Array
+        Solution vector x of shape (3,).
+    """
+    # Unpack elements for readability
+    a11, a12, a13 = A[0, 0], A[0, 1], A[0, 2]
+    a21, a22, a23 = A[1, 0], A[1, 1], A[1, 2]
+    a31, a32, a33 = A[2, 0], A[2, 1], A[2, 2]
+
+    b1, b2, b3 = b[0], b[1], b[2]
+
+    # Compute determinant
+    det = (
+        a11 * (a22 * a33 - a23 * a32)
+        - a12 * (a21 * a33 - a23 * a31)
+        + a13 * (a21 * a32 - a22 * a31)
+    )
+
+    inv_det = 1.0 / det
+
+    # Compute solution using Cramer's rule logic (or adjugate matrix)
+    x1 = (
+        b1 * (a22 * a33 - a23 * a32)
+        - b2 * (a12 * a33 - a13 * a32)
+        + b3 * (a12 * a23 - a13 * a22)
+    ) * inv_det
+
+    x2 = (
+        a11 * (b2 * a33 - a23 * b3)
+        - a21 * (b1 * a33 - a13 * b3)
+        + a31 * (b1 * a23 - a13 * b2)
+    ) * inv_det
+
+    x3 = (
+        a11 * (a22 * b3 - b2 * a32)
+        - a21 * (a12 * b3 - b1 * a32)
+        + a31 * (a12 * b2 - a22 * b1)
+    ) * inv_det
+
+    return jnp.array([x1, x2, x3])
