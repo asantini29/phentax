@@ -8,6 +8,8 @@ Collocation point methods for pseudo-PN coefficient computation.
 This module implements the linear system solving to compute pseudo-PN coefficients
 that augment the Post-Newtonian expansion to match numerical relativity fits.
 
+Credits for the original implementations: Cecilio García Quirós
+
 .. autosummary::
    :toctree: _autosummary
     OmegaPseudoPNCoeffs

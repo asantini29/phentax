@@ -7,6 +7,8 @@ Amplitude coefficient computation for IMRPhenomT(HM).
 This module implements the pAmp class functionality from phenomxpy,
 computing all the coefficients needed for the IMR amplitude ansatze.
 
+Credits for the original implementations: Cecilio García Quirós
+
 .. autosummary::
     :toctree: _autosummary
     AmplitudeCoeffs

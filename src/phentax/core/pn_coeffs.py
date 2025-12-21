@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Alessandro Santini
+# Copyright (C) 2025 Alessandro Santini
 # SPDX-License-Identifier: MIT
 """
 Post-Newtonian (PN) coefficients for IMRPhenomT(HM).
@@ -9,6 +9,8 @@ for all supported modes. These are mode-dependent and spin-dependent.
 References:
 - TaylorT3 omega: Eq. A5 in arXiv:2012.11923 (IMRPhenomT paper)
 - Amplitude PN: Eq. 9.4 Blanchet 2008, Eq. 43 Faye 2012, Eq. 4.17 Arun, Eq. 4.27 Buonanno
+
+Credits for the original implementations: Cecilio García Quirós
 """
 
 from typing import NamedTuple

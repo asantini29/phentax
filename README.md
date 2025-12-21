@@ -7,11 +7,25 @@ At present, `phentax` supports the generation of time-domain waveforms for quasi
 ## Installation
 This project is managed by [uv](https://docs.astral.sh/uv/). To set up the development environment, first clone the repository:
 ```
-git clone #<repository_url>
+git clone https://github.com/asantini29/phentax
 cd phentax
 uv install
 ```
 This will create a virtual environment and install all necessary dependencies. Run your commands within this environment using
 ```
 uv run <YOUR-COMMAND>
+```
+
+## Credits
+The original `python` implementation of the IMRPhenomT(HM) waveform models in the `phenomxpy` package were developed by Cecilio García Quirós. This JAX re-implementation builds upon his work. If you use this code in your research, please cite both the original `phenomxpy` package and this `phentax` implementation:
+```
+@misc{garcíaquirós2025gpuacceleratedlisaparameterestimation,
+      title={GPU-accelerated LISA parameter estimation with full time domain response},
+      author={Cecilio García-Quirós and Shubhanshu Tiwari and Stanislav Babak},
+      year={2025},
+      eprint={2501.08261},
+      archivePrefix={arXiv},
+      primaryClass={gr-qc},
+      url={https://arxiv.org/abs/2501.08261},
+}
 ```

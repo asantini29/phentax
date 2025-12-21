@@ -9,6 +9,8 @@ Utility functions for phentax.
 Contains helper functions for mass ratios, spins, unit conversions,
 and spin-weighted spherical harmonics, all implemented in pure JAX.
 
+Credits for the original implementations: Cecilio García Quirós
+
 .. autosummary::
     :toctree: _autosummary
 
@@ -26,6 +28,7 @@ and spin-weighted spherical harmonics, all implemented in pure JAX.
     amp_nrto_si
     mode_to_lm
     mode_to_int
+    solve_3x3_explicit
 """
 
 

@@ -5,6 +5,8 @@ Internals
 ============================
 Internal data structures and coefficient computation for IMRPhenomT(HM).
 
+Credits for the original implementations: Cecilio García Quirós
+
 .. autosummary::
    :toctree: _autosummary
 

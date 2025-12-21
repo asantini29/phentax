@@ -6,6 +6,8 @@ Phase and omega coefficient computation for IMRPhenomT(HM).
 This module implements the pPhase class functionality from phenomxpy,
 computing all the coefficients needed for the IMR omega and phase ansatze.
 
+Credits for the original implementations: Cecilio García Quirós
+
 .. autosummary::
     :toctree: _autosummary
     PhaseCoeffs

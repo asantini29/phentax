@@ -7,6 +7,8 @@ Waveform
 
 IMRPhenomTHM interface class for waveform generation.
 
+Credits for the original implementations: Cecilio García Quirós
+
 ..autoclass:: IMRPhenomTHM
     :members:
     :undoc-members:
