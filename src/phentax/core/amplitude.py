@@ -12,8 +12,9 @@ computing all the coefficients needed for the IMR amplitude ansatze.
 
 """
 
-from typing import NamedTuple, Tuple
+from typing import Tuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -24,7 +25,7 @@ from .internals import WaveformParams
 from .phase import PhaseCoeffs, _inspiral_ansatz_domega, imr_omega
 
 
-class AmplitudeCoeffs(NamedTuple):
+class AmplitudeCoeffs(eqx.Module):
     """
     All amplitude coefficients for a given mode.
     """

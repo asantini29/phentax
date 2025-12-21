@@ -9,8 +9,8 @@ Internals
 Internal data structures and coefficient computation for IMRPhenomT(HM).
 """
 
-from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -23,7 +23,7 @@ from . import fits
 # =============================================================================
 # Data structures (pytree-compatible)
 # =============================================================================
-class WaveformParams(NamedTuple):
+class WaveformParams(eqx.Module):
     """
     Physical parameters and derived quantities.
     These are intermediate quantities used throughout the waveform computation.
@@ -379,4 +379,4 @@ def compute_wf_length_params(
     total_length = length_negative + length_positive + 1  # +1 for the zero time
     Mt_min = -length_negative * params.Mdelta_t
 
-    return params._replace(Mt_min=Mt_min, length=total_length)
+    return eqx.tree_at(lambda p: (p.Mt_min, p.length), params, (Mt_min, total_length))

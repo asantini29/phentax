@@ -11,8 +11,8 @@ Collocation point methods for pseudo-PN coefficient computation.
 This module implements the linear system solving to compute pseudo-PN coefficients
 that augment the Post-Newtonian expansion to match numerical relativity fits.
 """
-from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -22,7 +22,7 @@ from . import fits
 jax.config.update("jax_enable_x64", True)
 
 
-class OmegaPseudoPNCoeffs(NamedTuple):
+class OmegaPseudoPNCoeffs(eqx.Module):
     """Pseudo-PN coefficients for omega inspiral ansatz (6 coefficients)."""
 
     c1: float | Array
@@ -33,7 +33,7 @@ class OmegaPseudoPNCoeffs(NamedTuple):
     c6: float | Array
 
 
-class AmpPseudoPNCoeffs(NamedTuple):
+class AmpPseudoPNCoeffs(eqx.Module):
     """Pseudo-PN coefficients for amplitude inspiral ansatz (3 coefficients)."""
 
     c1: float | Array

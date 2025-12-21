@@ -21,6 +21,7 @@ from phentax.core.phase import (
     imr_phase,
 )
 from phentax.utils.config import configure_jax
+from phentax.utils.utility import check_equal_bhs
 
 # Configure JAX
 configure_jax(platform="cpu", enable_x64=True)
@@ -71,9 +72,6 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
         inclination=float(inclination),
     )
 
-    print("PhenomXPy pWF initialized.")
-    print(f"PhenomXPy pWF attributes: {dir(_pwf)}")
-
     # Compute coefficients
     tax_phase_coeffs = {}
     tax_amp_coeffs = {}
@@ -105,21 +103,9 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
     xpy_phase_coeffs["22"] = pphase22
     xpy_amp_coeffs["22"] = pamp22
 
-    # # print all the attributes of pphase22 and tax_phase_coeffs['22'] to compare
-    # print('=' * 40)
-    # print("PhenomXPy Phase Coefficients (22):")
-    # for attr in dir(pphase22):
-    #     if not attr.startswith("_") and not callable(getattr(pphase22, attr)):
-    #         print(f"  {attr}: {getattr(pphase22, attr)}")
-    # print('=' * 40)
-    # print("Phentax Phase Coefficients (22):")
-    # print(phase_coeffs_22)
-    # print("Phentax Phase Coefficients (22):")
-    # for attr in dir(phase_coeffs_22):
-    #     if not attr.startswith("_") and not callable(getattr(phase_coeffs_22, attr)):
-    #         print(f"  {attr}: {getattr(phase_coeffs_22, attr)}")
-
     # Other modes
+    odd_m_modes = [21, 33, 55]
+    is_equal = check_equal_bhs(m1, m2, chi1, chi2)
     for mode in MODES:
         if mode == 22:
             continue
@@ -164,6 +150,9 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
     phase22 = imr_phase(times, dparams.eta, tax_phase_coeffs["22"])
 
     for mode in MODES:
+        if is_equal and mode in odd_m_modes:
+            print(f"Skipping mode {mode} for equal-mass case.")
+            continue
         mode_str = str(mode)
 
         # Phentax
@@ -213,6 +202,9 @@ def test_amp_phase_comparison(m1, m2, chi1, chi2, case_name):
         )
 
         phase_check = np.isclose(_phase_tax, _phase_xpy).all()
+
+        assert amp_check, f"Amplitude mismatch for mode {mode} in case {case_name}"
+        assert phase_check, f"Phase mismatch for mode {mode} in case {case_name}"
 
         print(f"Mode {mode} - Amplitude match: {amp_check}, Phase match: {phase_check}")
 
