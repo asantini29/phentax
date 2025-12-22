@@ -42,13 +42,8 @@ jobs:
         run: |
           uv sync --all-groups
 
-      - name: Generate API documentation
-        run: |
-          cd docs && uv run make html
-
       - name: Build documentation
         run: |
-          # uv run sphinx-build -b html docs docs/_build/html -W --keep-going
           cd docs && uv run make html
         # -W treats warnings as errors
         # --keep-going continues despite errors to see all issues
