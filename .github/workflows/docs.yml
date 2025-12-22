@@ -41,13 +41,14 @@ jobs:
         run: |
           uv sync --all-groups
 
-      - name: Generate API documentation
-        run: |
-          uv run sphinx-apidoc -f -e -M -o docs/api src/phentax
+      # - name: Generate API documentation
+      #   run: |
+      #     uv run sphinx-apidoc -f -e -M -o docs/api src/phentax
 
       - name: Build documentation
         run: |
-          uv run sphinx-build -b html docs docs/_build/html --keep-going
+            uv run sphinx-build -W -b html docs docs/_build/html
+        # uv run sphinx-build -b html docs docs/_build/html --keep-going
         # -W treats warnings as errors
         # --keep-going continues despite errors to see all issues
 

@@ -5,7 +5,7 @@
 
 """
 Parameter space fits for IMRPhenomT(HM).
-============================
+==========================================
 
 Contains calibrated fits for collocation points, ringdown frequencies,
 final spin/mass, and other quantities. All functions are JAX-compatible.

@@ -25,7 +25,7 @@ def spin_weighted_spherical_harmonic(
     emm: int | Array = 2,
 ) -> Array:
     """
-    Compute spin-weighted spherical harmonic :math:`_{-2}Y_{\\ell,\\emm}(\\theta, \phi)`.
+    Compute spin-weighted spherical harmonic :math:`_{-2}Y_{\\ell,m}(\\theta, \phi)`.
 
     Optimized for JAX using explicit half-angle formulas to avoid branching.
     Valid for s=-2 and specific modes used in gravitational waves.

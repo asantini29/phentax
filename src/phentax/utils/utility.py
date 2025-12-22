@@ -321,28 +321,28 @@ def amp_nr_to_si(
 @jax.jit
 def mode_to_lm(mode: Array) -> tuple[Array, Array]:
     """
-    Convert integer mode key to (ell, m) mode indices.
-    Assumes positive m modes.
+    Convert integer mode key to :math:`(\\ell, m)` mode indices.
+    Assumes positive :math:`m` modes.
 
     Parameters
     ----------
     mode : int | Array
-        Integer key: 10*ell + |m| for positive m modes.
+        Integer key: :math:`10*\\ell + abs(m)` for positive :math:`m` modes.
 
     Returns
     -------
     tuple of Array
-        (ell, m) mode indices.
+        :math:`(\\ell, m)` mode indices.
     """
     ell = mode // 10
-    m = mode % 10
+    emm = mode % 10
 
-    return ell, m
+    return ell, emm
 
 
 def mode_to_int(ell: int, emm: int) -> int:
     """
-    Convert (ell, emm) mode indices to integer key.
+    Convert :math:`(\\ell, m)` mode indices to integer key.
 
     Parameters
     ----------
@@ -354,7 +354,7 @@ def mode_to_int(ell: int, emm: int) -> int:
     Returns
     -------
     int
-        Integer key: 10*ell + |m| for positive m modes.
+        Integer key: :math:`10*\\ell + abs(m)` for positive :math:`m` modes.
     """
     return 10 * ell + abs(emm)
 

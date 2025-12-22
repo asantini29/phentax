@@ -39,11 +39,7 @@ mathjax3_config = {
     },
 }
 
-autodoc_default_options = {
-    "members": True,
-    "undoc-members": False,  # Don't show undocumented members
-    "exclude-members": "__weakref__,_fields,_field_defaults,_make,_asdict,_replace",  # Hide namedtuple internals
-}
+autosummary_generate = False
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
