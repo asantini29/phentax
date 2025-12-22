@@ -103,7 +103,7 @@ class IMRPhenomTHM:
                 raise TypeError(
                     "higher_modes must be None, a list, an array, or 'all'."
                 )
-            logger.debug("Including higher modes: ", self.higher_modes)
+            logger.debug("Including higher modes: %s", self.higher_modes)
             self.has_hm = True
             self.odd_modes_mask = (self.higher_modes % 2 == 1)[:, None]
 
@@ -126,10 +126,10 @@ class IMRPhenomTHM:
             self.negative_mms = jnp.array([])
 
         self.coarse_grain = coarse_grain
-        logger.debug("Coarse graining set to ", {self.coarse_grain})
+        logger.debug("Coarse graining set to %s", self.coarse_grain)
 
         self.use_splines = use_splines
-        logger.debug("Using splines set to ", self.use_splines)
+        logger.debug("Using splines set to %s", self.use_splines)
 
         if t_low_fit:
             logger.debug("Using fit in t(f): t_low = - 0.015 * f^(-2.7)")
@@ -593,7 +593,7 @@ class IMRPhenomTHM:
         h_plus = jnp.real(strain)
         h_cross = -jnp.imag(strain)
 
-        h_plus, h_cross = self.rotate_by_polarization(h_plus, h_cross, psi)
+        h_plus, h_cross = self.rotate_by_polarization_angle(h_plus, h_cross, psi)
 
         return times, mask, h_plus, h_cross
 
@@ -781,7 +781,9 @@ class IMRPhenomTHM:
         h_cross = -jnp.imag(strain)
 
         # Rotate by polarization angle psi
-        h_plus, h_cross = self.rotate_by_polarization(h_plus, h_cross, wf_params.psi)
+        h_plus, h_cross = self.rotate_by_polarization_angle(
+            h_plus, h_cross, wf_params.psi
+        )
 
         # Convert times to seconds
         times_sec = mass_to_second(times, wf_params.total_mass)
@@ -825,7 +827,7 @@ class IMRPhenomTHM:
         return h_plus_interp, h_cross_interp
 
     @jax.jit(static_argnames="self")
-    def rotate_by_polarization(
+    def rotate_by_polarization_angle(
         self,
         h_plus: Array,
         h_cross: Array,
@@ -936,7 +938,6 @@ class IMRPhenomTHM:
 
         return wf_params
 
-    # @jax.jit(static_argnames="self")
     def get_time_grids(
         self,
         wf_params: WaveformParams,
@@ -1063,172 +1064,3 @@ class IMRPhenomTHM:
         times, times_mask = self.get_time_grids(wf_params)
 
         return wf_params, times, times_mask, amplitude_coeffs_22, phase_coeffs_22
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from phenomxpy.phenomt.internals import pWF
-    from phenomxpy.phenomt.phenomt import IMRPhenomTHM as xpy_thm
-
-    jax.config.update("jax_traceback_filtering", "off")
-
-    m1 = 1.0 * 1e7
-    m2 = 2.0 * 1e6
-    chi1 = 0.9
-    chi2 = 0.1
-    distance = 500.0
-    inclination = jnp.pi / 3.0
-    phi_ref = 0.0
-    psi = 0.0
-    f_ref = 1e-4
-    f_min = 1e-4
-    # t_ref = 0.0
-    delta_t = 2.5
-
-    tlowfit = True
-    tol = 1e-12
-
-    imr = IMRPhenomTHM(
-        higher_modes="all",
-        include_negative_modes=True,
-        t_low_fit=tlowfit,
-        coarse_grain=False,
-        atol=tol,
-        rtol=tol,
-    )
-    mode_array = None  # [[2,2], [2,1], [3,3], [4,4]]
-    import time
-
-    st = time.time()
-    times, mask, h_plus, h_cross = imr.compute_polarizations_at_once(
-        m1,
-        m2,
-        chi1,
-        chi2,
-        distance,
-        phi_ref,
-        f_ref,
-        f_min,
-        inclination,
-        psi,
-        delta_t=delta_t,
-    )
-    logger.info(f"PHENTAX polarizations computed in {time.time() - st} WARMUP seconds")
-
-    st = time.time()
-    times, mask, h_plus, h_cross = imr.compute_polarizations_at_once(
-        m1,
-        m2,
-        chi1,
-        chi2,
-        distance,
-        phi_ref,
-        f_ref,
-        f_min,
-        inclination,
-        psi,
-        delta_t=delta_t,
-    )
-    logger.info(f"PHENTAX polarizations computed in {time.time() - st} seconds")
-
-    st = time.time()
-    pwf = pWF(
-        eta=m1 * m2 / (m1 + m2) ** 2,
-        s1=chi1,
-        s2=chi2,
-        f_min=f_min,
-        f_ref=f_ref,
-        total_mass=m1 + m2,
-        distance=distance,
-        inclination=inclination,
-        polarization_angle=psi,
-        delta_t=delta_t,
-        phi_ref=phi_ref,
-    )
-
-    xpy_wave_gen = xpy_thm(mode_array=mode_array, pWF_input=pwf)
-    logger.info(f"XPY waveform generator created in {time.time() - st} seconds")
-
-    xpy_plus, xpy_cross, xpy_times = xpy_wave_gen.compute_polarizations()
-
-    st = time.time()
-    xpy_plus, xpy_cross, xpy_times = xpy_wave_gen.compute_polarizations()
-    logger.info(f"XPY polarizations computed in {time.time() - st} seconds")
-
-    # plt.figure(); plt.plot(times[mask], h_plus[mask].real); plt.plot(times[mask], h_cross[mask].real); plt.title("PHENTAX"); plt.xlabel("time [s]"); plt.show()
-    fig, axs = plt.subplots(2, 2, sharex=True, figsize=(16, 12))
-    axs[0, 0].plot(times[mask], h_plus[mask], label="PHENTAX")
-    axs[0, 0].plot(xpy_times, xpy_plus, ls="--", label="PHENOMXPY")
-    axs[0, 0].legend()
-    axs[0, 0].set_title("H plus")
-
-    axs[0, 1].plot(times[mask], h_cross[mask], label="PHENTAX")
-    axs[0, 1].plot(xpy_times, xpy_cross, ls="--", label="PHENOMXPY")
-    axs[0, 1].legend()
-    axs[0, 1].set_title("H cross")
-
-    from scipy.interpolate import CubicSpline as _CubicSpline
-
-    _spline = _CubicSpline(xpy_times, xpy_plus)
-    xpy_plus_interp = _spline(np.asarray(times[mask]))
-    xpy_cross_interp = _spline(np.asarray(times[mask]))
-
-    # difference plot
-    axs[1, 0].plot(
-        times[mask],
-        jnp.abs(h_plus[mask] - xpy_plus_interp) / jnp.abs(h_plus[mask]),
-    )
-    axs[1, 0].set_title("Relative difference H plus")
-    axs[1, 0].set_xlabel("time [s]")
-
-    axs[1, 1].plot(
-        times[mask],
-        jnp.abs(h_cross[mask] - xpy_cross_interp) / jnp.abs(h_cross[mask]),
-    )
-    axs[1, 1].set_title("Relative difference H cross")
-    axs[1, 1].set_xlabel("time [s]")
-
-    plt.tight_layout()
-    plt.show()
-
-    isclose = jnp.allclose(h_plus[mask], xpy_plus_interp, rtol=1e-5, atol=1e-5)
-    print(f"H plus match with tolerance 1e-5: {isclose}")
-
-    isclose = jnp.allclose(h_plus[mask], xpy_plus_interp, rtol=1e-7, atol=1e-7)
-    print(f"H plus match with tolerance 1e-7: {isclose}")
-
-    isclose = jnp.allclose(h_plus[mask], xpy_plus_interp, rtol=1e-12, atol=1e-12)
-    print(f"H plus match with tolerance 1e-12: {isclose}")
-
-    print("==" * 10)
-
-    isclose = jnp.allclose(h_cross[mask], xpy_cross_interp, rtol=1e-5, atol=1e-5)
-    print(f"H cross match with tolerance 1e-5: {isclose}")
-
-    isclose = jnp.allclose(h_cross[mask], xpy_cross_interp, rtol=1e-7, atol=1e-7)
-    print(f"H cross match with tolerance 1e-7: {isclose}")
-
-    isclose = jnp.allclose(h_cross[mask], xpy_cross_interp, rtol=1e-12, atol=1e-12)
-    print(f"H cross match with tolerance 1e-12: {isclose}")
-
-    wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
-        imr.initial_processing(
-            m1,
-            m2,
-            chi1,
-            chi2,
-            distance,
-            phi_ref,
-            f_ref,
-            f_min,
-            inclination,
-            psi,
-            delta_t,
-        )
-    )
-    tax_amp = jax.vmap(imr_amplitude)(
-        times, wf_params.eta, amplitude_coeffs_22, phase_coeffs_22
-    )[0]
-    xpy_amp = xpy_wave_gen.phenT_classes["22"].pAmp.imr_amplitude(np.asarray(times[0]))
-    # breakpoint()
