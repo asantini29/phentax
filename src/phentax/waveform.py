@@ -37,7 +37,7 @@ from phentax.utils.coarse_graining import (
     masked_evaluate,
 )
 from phentax.utils.config import setup_logging
-from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm,second_to_mass
+from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm,second_to_mass, mass_to_hz, df_dt_to_Hz_squared
 from phentax.utils.ylm import (
     spin_weighted_spherical_harmonic,
     spin_weighted_spherical_harmonic_all_modes,
@@ -1223,6 +1223,15 @@ class IMRPhenomTHM:
                     # Compute f_0 and f_dot for this specific mode
                     f_0 = imr_omega(t_0_mass, wf_params.eta[0], mode_phase_coeffs) / (2 * jnp.pi) 
                     f_dot = imr_omega_dot(t_0_mass, wf_params.eta[0], mode_phase_coeffs) / (2 * jnp.pi)
+
+                    f_0 = mass_to_hz(f_0, wf_params.total_mass[0])
+
+                    if f_0 < frequency_grid[0] or f_0 > frequency_grid[-1]:
+                        continue
+
+                    f_dot = df_dt_to_Hz_squared(f_dot, wf_params.total_mass[0])
+                    # f_dot = mass_to_hz(f_dot, wf_params.total_mass[0])
+
                     print('F0 AND F DOT: ',f_0,f_dot,self.higher_modes[mode_index],time_index)
 
                     # Compute frequency and frequency derivative for each source

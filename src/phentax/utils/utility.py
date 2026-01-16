@@ -262,6 +262,24 @@ def second_to_mass(t_sec: float | Array, total_mass: float | Array) -> float | A
     """
     return t_sec / (total_mass * MTSUN_SI)
 
+@jax.jit
+def df_dt_to_Hz_squared(dfdt: float | Array, total_mass: float | Array) -> float | Array:
+    """
+    Convert df/dt from dimensionless units to 1/secondsˆ2.
+
+    Parameters
+    ----------
+    dfdt : float | Array
+        derivative in dimensionless units.
+    total_mass : float | Array
+        Total mass in solar masses.
+
+    Returns
+    -------
+    float | Array
+        Dimensionless time t/M.
+    """
+    return dfdt / (total_mass * MTSUN_SI)**2
 
 @jax.jit
 def mass_to_second(t_m: float | Array, total_mass: float | Array) -> float | Array:
