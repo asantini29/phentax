@@ -1231,8 +1231,10 @@ class IMRPhenomTHM:
 
                     f_dot = df_dt_to_Hz_squared(f_dot, wf_params.total_mass[0])
                     # f_dot = mass_to_hz(f_dot, wf_params.total_mass[0])
-
-                    print('F0 AND F DOT: ',f_0,f_dot,self.higher_modes[mode_index],time_index)
+                    if mode_index == 0:
+                        print('F0 AND F DOT: ',f_0,f_dot,'22',time_index)
+                    else:
+                        print('F0 AND F DOT: ',f_0,f_dot,self.higher_modes[mode_index-1],time_index)
 
                     # Compute frequency and frequency derivative for each source
                     # t_0 is scalar, wf_params.eta is batched (axis 0), phase_coeffs_22 fields are batched (axis 0)
@@ -1242,12 +1244,13 @@ class IMRPhenomTHM:
                     #                                                             num_sources, axis=0) - f_0[:, jnp.newaxis]), 
                     #                                                             axis=1)
 
+                    # Select frequency bins around f_0, for each binary
                     closest_frequency_indexes = jnp.argmin(jnp.abs(frequency_grid - f_0))
-                    # Select frequency bins around f_0, for each binary 
-                    lower_mask = closest_frequency_indexes-closest_f_bins
-                    upper_mask = closest_frequency_indexes+closest_f_bins
 
-                    # f = jnp.array([frequency_grid[lower_mask[i]:upper_mask[i]] for i in range(num_sources)])
+                    # Make masks ensuring the indexes don't go out of bounds
+                    lower_mask = jnp.maximum(0, closest_frequency_indexes-closest_f_bins)
+                    upper_mask = jnp.minimum(frequency_grid.size, closest_frequency_indexes+closest_f_bins)
+
                     f = frequency_grid[lower_mask:upper_mask]
                     h_prefactor = Amps*jnp.exp(1j*Phases)/jnp.sqrt(2*f_dot) * jnp.exp(-1j*jnp.pi*((f_0 - f)**2)/f_dot)
 
