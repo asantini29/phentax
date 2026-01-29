@@ -393,6 +393,93 @@ class IMRPhenomTHM:
         h_modes = amplitudes * jnp.exp(-1j * phases)
         return h_modes
 
+    def compute_amp_phase(
+        self,
+        m1: float | Array,
+        m2: float | Array,
+        chi1z: float | Array,
+        chi2z: float | Array,
+        distance: float | Array,
+        phi_ref: float | Array,
+        f_ref: float | Array,
+        f_min: float | Array,
+        inclination: float,
+        psi: float | Array,
+        delta_t: float = 15.0,
+        t_min: float = jnp.nan,
+        t_ref: float = jnp.nan,
+    ) -> tuple[Array, Array, Array]:
+        """
+        Generate amplitude and phase for all modes for a batch of binaries or a single input.
+
+        Parameters
+        ----------
+        m1 : float | Array
+            Mass of the first black hole in solar masses.
+        m2 : float | Array
+            Mass of the second black hole in solar masses.
+        chi1z : float | Array
+            Dimensionless spin of the first black hole along the orbital angular momentum.
+        chi2z : float | Array
+            Dimensionless spin of the second black hole along the orbital angular momentum.
+        distance : float | Array
+            Luminosity distance to the binary in megaparsecs.
+        phi_ref : float | Array
+            Reference phase at frequency f_ref in radians.
+        f_ref : float | Array
+            Reference frequency in Hz.
+        f_min : float | Array
+            Minimum frequency in Hz.
+        inclination : float
+            Inclination angle of the binary in radians.
+        psi : float | Array
+            Polarization angle in radians.
+        delta_t : float, default 15.0
+            Time step for waveform generation in seconds.
+        t_min : float, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
+        t_ref : float, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+
+        Returns
+        -------
+        times : Array
+            Time array in seconds.
+        mask : Array
+            Boolean mask indicating valid time points.
+        amplitudes : Array
+            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        phases : Array
+            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        """
+
+        wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
+            self.initial_processing(
+                m1,
+                m2,
+                chi1z,
+                chi2z,
+                distance,
+                phi_ref,
+                f_ref,
+                f_min,
+                inclination,
+                psi,
+                delta_t,
+                t_min,
+                t_ref,
+            )
+        )
+        amplitudes, phases = jax.vmap(self._compute_all_modes)(
+            times,
+            mask,
+            wf_params,
+            amplitude_coeffs_22,
+            phase_coeffs_22,
+        )  # shape (Nbinaries, Nmodes, Ntimes)
+
+        return times, mask, amplitudes, phases
+
     def compute_hlms(
         self,
         m1: float | Array,
@@ -410,7 +497,7 @@ class IMRPhenomTHM:
         t_ref: float = jnp.nan,
     ) -> tuple[Array, Array, Array]:
         """
-        Generate complex strain :math:`h_{lm}` for all modes for a single input binary.
+        Generate complex strain :math:`h_{lm}` for all modes for a batch of binaries or a single input.
 
         Parameters
         ----------
@@ -451,30 +538,21 @@ class IMRPhenomTHM:
             Complex strain arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
         """
 
-        wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
-            self.initial_processing(
-                m1,
-                m2,
-                chi1z,
-                chi2z,
-                distance,
-                phi_ref,
-                f_ref,
-                f_min,
-                inclination,
-                psi,
-                delta_t,
-                t_min,
-                t_ref,
-            )
+        times, mask, amplitudes, phases = self.compute_amp_phase(
+            m1,
+            m2,
+            chi1z,
+            chi2z,
+            distance,
+            phi_ref,
+            f_ref,
+            f_min,
+            inclination,
+            psi,
+            delta_t,
+            t_min,
+            t_ref,
         )
-        amplitudes, phases = jax.vmap(self._compute_all_modes)(
-            times,
-            mask,
-            wf_params,
-            amplitude_coeffs_22,
-            phase_coeffs_22,
-        )  # shape (Nbinaries, Nmodes, Ntimes)
 
         h_lms = (
             self.combine_amp_phase(amplitudes, phases) * wf_params.amp_factor
