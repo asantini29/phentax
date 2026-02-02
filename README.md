@@ -11,8 +11,20 @@ This project is managed by [uv](https://docs.astral.sh/uv/). To set up the devel
 ```
 git clone https://github.com/asantini29/phentax
 cd phentax
-uv install
 ```
+
+### GPU Installation (CUDA)
+For systems with NVIDIA GPUs and CUDA support, install with:
+```
+uv sync --group gpu
+```
+
+### CPU Installation
+For CPU-only systems, install with:
+```
+uv sync --group cpu
+```
+
 This will create a virtual environment and install all necessary dependencies. Run your commands within this environment using
 ```
 uv run <YOUR-COMMAND>
