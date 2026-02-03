@@ -55,7 +55,7 @@ docs = [
     "nbsphinx>=0.9.8",
 ]
 gpu = [
-    "jax[cuda12x]>=0.8.1",
+    "jax[cuda12]>=0.8.1",
 ]
 cpu = [
     "jax[cpu]>=0.8.1",
