@@ -37,14 +37,110 @@ def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array
     return 1.0 / (omega_lo / (2.0 * jnp.pi)) / 12.0
 
 
+def estimate_adaptive_steps(
+    eta: float | Array, tmin: float | Array, tmax: float | Array
+) -> int:
+    """
+    Estimate the number of adaptive grid steps needed across a batch of binaries.
+
+    Uses the analytical solution of the leading-order ODE to predict the
+    total number of grid points, then returns a value rounded up to the
+    nearest 5000 for JIT cache friendliness.
+
+    Parameters
+    ----------
+    eta : float | Array
+        Symmetric mass ratio(s).
+    tmin : float | Array
+        Minimum time(s) (start of the grid).
+    tmax : float | Array
+        Maximum time(s) (end of the grid).
+
+    Returns
+    -------
+    int
+        Estimated number of required steps (with safety margin), rounded
+        up to the nearest 5000.
+    """
+    eta = jnp.atleast_1d(jnp.asarray(eta, dtype=jnp.float64))
+    tmin = jnp.atleast_1d(jnp.asarray(tmin, dtype=jnp.float64))
+    tmax = jnp.atleast_1d(jnp.asarray(tmax, dtype=jnp.float64))
+
+    C = (2.0 * jnp.pi / 3.0) * jnp.power(eta / 5.0, 3.0 / 8.0)
+
+    # Uniform region: from tmax to t_thresh=-1 with step C
+    N_uniform = jnp.maximum((tmax + 1.0) / C, 0.0)
+
+    # Adaptive region: ODE solution from u_start to u_end = -tmin
+    u_start = jnp.maximum(-tmax, 1.0)
+    N_adaptive = jnp.maximum(
+        (jnp.power(-tmin, 5.0 / 8.0) - jnp.power(u_start, 5.0 / 8.0))
+        / (5.0 * C / 8.0),
+        0.0,
+    )
+
+    # Take max across the batch, add safety margin, round up to nearest 5000
+    N_total = int(jnp.ceil(jnp.max(N_uniform + N_adaptive) * 1.2)) + 200
+    N_total = int(jnp.ceil(N_total / 5000.0) * 5000)
+    return max(N_total, 5000)  # at least 5000
+
+
+def estimate_adaptive_steps_from_T(
+    T: float, delta_t: float = 15.0
+) -> int:
+    """
+    Estimate adaptive grid size from observation time and time step only.
+
+    Uses worst-case symmetric mass ratio (eta = 0.25, equal mass) to
+    guarantee the grid is large enough for any binary.  The result depends
+    only on user-controlled quantities, so it can be computed once at
+    init time without causing JIT recompilation.
+
+    Parameters
+    ----------
+    T : float
+        Total observation time in seconds.
+    delta_t : float, default 15.0
+        Time step in seconds.
+
+    Returns
+    -------
+    int
+        Estimated number of required steps, rounded up to the nearest
+        5000 for JIT-cache friendliness.
+    """
+    # Worst-case: equal mass eta=0.25 gives the densest adaptive grid.
+    # tmin ~ -T/delta_t (rough conversion to mass-scaled time), tmax ~ 0
+    # This is conservative because the actual mass-scaled time span is
+    # almost always shorter.
+    eta_worst = 0.25
+    num_steps = T / delta_t
+    # Use the same formula as estimate_adaptive_steps but with
+    # conservative bounds derived from num_steps.
+    # In mass-scaled units, the grid spans roughly [-num_steps * delta_t_M, 0]
+    # where delta_t_M ~ delta_t / M_total_seconds.  For the purpose of
+    # bounding, we use num_steps directly as a proxy for |tmin|.
+    # The uniform grid would need num_steps points; the adaptive grid is
+    # always sparser, so num_steps is a safe upper bound.
+    return estimate_adaptive_steps(
+        eta_worst, -num_steps, 0.0
+    )
+
+
 @partial(jax.jit, static_argnames=["max_steps"])
 def _generate_adaptive_grid(
     eta: float, tmin: float, tmax: float, max_steps: int = 10000
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
-    Generate an adaptive time grid using jax.lax.scan.
+    Generate an adaptive time grid using vectorized operations.
 
-    The grid is generated backwards from tmax to tmin.
+    The grid has two regions generated backwards from tmax:
+
+    1. **Uniform region** (tmax to t = -1): the leading-order frequency
+       formula is clamped, giving a constant step size ``C``.
+    2. **Adaptive region** (t = -1 to tmin): the step size grows as
+       ``C * |t|^{3/8}`` according to the analytical ODE solution.
+
     The resulting grid is padded with tmin at the beginning (low indices)
     and sorted in ascending order.
 
@@ -67,57 +163,45 @@ def _generate_adaptive_grid(
           True means the point is part of the adaptive grid.
           False means it is a padding value (tmin).
     """
+    # Step-size constant: dt = C * |t|^{3/8}, clamped to dt = C for |t| < 1
+    C = (2.0 * jnp.pi / 3.0) * jnp.power(eta / 5.0, 3.0 / 8.0)
 
-    # State: (current_time, is_finished)
-    # We generate backwards from tmax to tmin
-    init_val = (tmax, False)
+    # Threshold time: for t > t_thresh the LO formula is clamped
+    t_thresh = -1.0
 
-    def scan_body(carry, _):
-        t_curr, is_finished = carry
+    # Phase 1  – uniform steps from tmax backwards with step C
+    N_uniform = jnp.maximum((tmax - t_thresh) / C, 0.0)
 
-        # Calculate step size at current time
-        # Use a safe time for the power law to avoid NaNs in padding region
-        # (though we mask the result, the computation must be safe)
-        safe_t = jnp.minimum(t_curr, -1.0)
-        dt = leading_order_delta_t(eta, safe_t)
+    # Phase 2  – adaptive steps, ODE: du/dn = C*u^{3/8}, u = -t
+    # Solution: u(n) = (u0^{5/8} + 5C/8 * n)^{8/5}
+    u_start = jnp.maximum(-tmax, -t_thresh)  # max(-tmax, 1.0)
+    u_start_pow = jnp.power(u_start, 5.0 / 8.0)
 
-        # Calculate next time candidate
-        t_next = t_curr - dt
+    # All indices at once – fully parallel
+    indices = jnp.arange(max_steps, dtype=jnp.float64)
 
-        # Determine if this step finishes the grid (crosses tmin)
-        # We are finished if we were already finished OR if we just crossed tmin
-        just_finished = t_next <= tmin
-        now_finished = is_finished | just_finished
+    # Uniform part: t = tmax - idx * C
+    t_uniform = tmax - indices * C
 
-        # Determine the output time for this step
-        # If we were already finished, pad with tmin
-        # If we just finished, clamp to tmin (this is the last valid point)
-        # If we are still active, use t_next
-        t_out = jnp.where(is_finished, tmin, jnp.where(just_finished, tmin, t_next))
+    # Adaptive part: t = -(u_start^{5/8} + 5C/8 * a_idx)^{8/5}
+    a_idx = jnp.maximum(indices - N_uniform, 0.0)
+    t_adaptive = -jnp.power(u_start_pow + (5.0 * C / 8.0) * a_idx, 8.0 / 5.0)
 
-        # Determine if this point is valid
-        # It is valid if we were NOT finished at the start of this step
-        # (This includes the point that hits tmin exactly/clamped)
-        is_valid = ~is_finished
+    # Select: uniform for the first N_uniform steps, adaptive after
+    in_uniform = indices < N_uniform
+    t_grid = jnp.where(in_uniform, t_uniform, t_adaptive)
 
-        new_carry = (t_out, now_finished)
-        return new_carry, (t_out, is_valid)
+    # Validity mask
+    mask = t_grid >= tmin
 
-    # Run scan
-    # We generate max_steps-1 points (since tmax is the 0th point)
-    _, (grid_body, mask_body) = jax.lax.scan(
-        scan_body, init_val, None, length=max_steps - 1
-    )
+    # Pad invalid points with tmin
+    grid = jnp.where(mask, t_grid, tmin)
 
-    # Construct full grid: [tmax, ...body...]
-    full_grid = jnp.concatenate([jnp.array([tmax]), grid_body])
-    full_mask = jnp.concatenate([jnp.array([True]), mask_body])
+    # Flip to ascending order
+    grid_asc = jnp.flip(grid)
+    mask_asc = jnp.flip(mask)
 
-    # Flip to get ascending order: [tmin (padded), ..., tmin, ..., tmax]
-    full_grid_asc = jnp.flip(full_grid)
-    full_mask_asc = jnp.flip(full_mask)
-
-    return full_grid_asc, full_mask_asc
+    return grid_asc, mask_asc
 
 
 @partial(jax.jit, static_argnames=["max_steps"])

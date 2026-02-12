@@ -29,6 +29,7 @@ from phentax.core import (
 )
 from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.coarse_graining import (
+    estimate_adaptive_steps_from_T,
     generate_adaptive_grid,
     generate_uniform_grid,
     masked_evaluate,
@@ -150,6 +151,13 @@ class IMRPhenomTHM:
             self.T = 3.0 / 12.0 * YRSID_SI
         else:
             self.T = T
+
+        # Pre-compute worst-case adaptive grid size so that max_steps is
+        # a class constant and never causes JIT recompilation.
+        if self.coarse_grain:
+            self._max_adaptive_steps: int | None = None  # will be set on first call
+        else:
+            self._max_adaptive_steps = None
 
     def __repr__(self):
         return (
@@ -1170,11 +1178,18 @@ class IMRPhenomTHM:
         """
 
         if self.coarse_grain:
+            # Use the pre-computed worst-case max_steps so the JIT-compiled
+            # grid generator is never recompiled due to parameter changes.
+            if self._max_adaptive_steps is None:
+                raise RuntimeError(
+                    "Adaptive grid size not initialized. "
+                    "This should not happen — please report a bug."
+                )
             times, mask = generate_adaptive_grid(
                 wf_params.eta,
                 wf_params.Mt_min,
                 wf_params.Mt_end,
-                max_steps=num_steps // 2,  # allocate half steps for adaptive grid
+                max_steps=self._max_adaptive_steps,
             )
 
         else:
@@ -1284,6 +1299,21 @@ class IMRPhenomTHM:
             T = self.T
 
         num_steps = int(jnp.ceil(T / delta_t))
+
+        # Lazily initialise the adaptive grid size on first call so that
+        # (T, delta_t) are known.  If T or delta_t grow in a later call
+        # we update, but only when the new estimate falls into a larger
+        # 5000-bucket — so recompilation is rare and bounded.
+        if self.coarse_grain:
+            new_max = estimate_adaptive_steps_from_T(T, delta_t)
+            if self._max_adaptive_steps is None or new_max > self._max_adaptive_steps:
+                self._max_adaptive_steps = new_max
+                logger.debug(
+                    "Adaptive grid max_steps set to %d (T=%.1f, delta_t=%.1f)",
+                    self._max_adaptive_steps,
+                    T,
+                    delta_t,
+                )
 
         times, times_mask = self.get_time_grids(wf_params, num_steps)
 
