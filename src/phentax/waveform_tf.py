@@ -1352,8 +1352,6 @@ class IMRPhenomTHM_TF:
 
 
         # TEMPORARY/DEV
-
-
         # Transpose to (num_sources, num_times, num_modes, 2*closest_f_bins) for vmapping (basically changing around order of axes)
         waveform_storage_transposed = waveform_storage.transpose(1, 0, 2, 3)
         frequency_indices_transposed = frequency_indices_storage.transpose(1, 0, 2, 3)
@@ -1361,51 +1359,98 @@ class IMRPhenomTHM_TF:
         # Number of frequency bins in the full grid
         n_freq = frequency_grid.size # TODO: can be precomputed before this function. 
 
-        def place_waveform_at_time(waveform_modes, indices_modes):
+        # Generate spherical harmonics for all modes and sources at once.
+        y_lms = spin_weighted_spherical_harmonic_all_modes(
+                    jnp.atleast_1d(inclination)[:, None],
+                    jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+                    self.ells,
+                    self.mms,
+                ) #Shape (num_sources, num_modes,1)
+        
+        y_lmms = spin_weighted_spherical_harmonic_all_modes(
+            jnp.atleast_1d(inclination)[:, None],
+            jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+            self.negative_ls,
+            self.negative_mms, 
+            ) #Shape (num_sources, num_modes,1)
+        
+        K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
+        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
+        
+
+        # total_fresnel_waveforms_h_plus = jnp.einsum('ni,ijk->jk',K_plus_lms,tf_grid)
+        # total_fresnel_waveforms_h_cross = jnp.einsum('ni,ijk->jk',K_cross_lms,tf_grid)
+
+        # h_plus_rotated, h_cross_rotated = imr.rotate_by_polarization_angle(total_fresnel_waveforms_h_plus, total_fresnel_waveforms_h_cross, psi)
+
+
+        def place_waveform_at_time(waveform_modes, indices_modes,K_plus, K_cross):
             """
             Place waveforms from all modes into the frequency grid for a single time step.
             
             waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
             indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
+            K_plus: (n_modes,) - complex coefficients for plus polarization
+            K_cross: (n_modes,) - complex coefficients for cross polarization
             
             Returns: (n_freq,) - summed waveform across modes at correct frequency positions
             """
-            # Flatten across modes and frequency bins
-            flat_waveform = waveform_modes.flatten()
-            flat_indices = indices_modes.flatten() # f indices.
-            
-            # Clip indices to valid range to avoid out-of-bounds (both on lower and upper end of the frequency grid)
-            flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
-            
-            # jnp.bincount doesn't support complex, so handle real and imaginary separately
-            # TODO: this is probably being done terribly, not sure we even need to seperate the real and imag parts. 
-            real_part = jnp.zeros(n_freq).at[flat_indices].add(flat_waveform.real)
-            imag_part = jnp.zeros(n_freq).at[flat_indices].add(flat_waveform.imag)
-            
-            return real_part + 1j * imag_part
+            # Multiply K coefficients *before* flattening so each mode's scalar
+            # broadcasts across its 2*closest_f_bins frequency entries.
+            # K_plus/K_cross: (n_modes,), waveform_modes: (n_modes, 2*closest_f_bins) 
+            h_plus_modes = K_plus[:, None] * waveform_modes   # (n_modes, 2*closest_f_bins)
+            h_cross_modes = K_cross[:, None] * waveform_modes
 
-        def process_source(waveforms_per_source, indices_per_source):
+            # Now flatten across modes and frequency bins
+            flat_h_plus = h_plus_modes.flatten()
+            flat_h_cross = h_cross_modes.flatten()
+            flat_indices = indices_modes.flatten()
+
+            # Mask out-of-bounds indices: zero their contributions
+            valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
+            flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
+            flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
+            
+            # Clip indices to valid range so .at[].add() doesn't error with out-of-bounds indices.
+            # The zeroed values mean nothing is actually added for these entries.
+            flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
+
+            result_plus = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_plus)
+            result_cross = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_cross)
+
+            return result_plus, result_cross
+
+        def process_source(waveforms_per_source, indices_per_source,K_plus, K_cross):
             """
             Process all time steps for a single source.
             
             waveforms_per_source: (n_times, n_modes, 2*closest_f_bins), this is a version of the TF grid for one source (with the wrong frequency axis)
             indices_per_source: (n_times, n_modes, 2*closest_f_bins)
+            K_plus: (n_modes,) - complex coefficients for plus polarization
+            K_cross: (n_modes,) - complex coefficients for cross polarization
             
             Returns: (n_times, n_freq) - TF map for this source
             """
             # This is vmapping across timesteps
-            return jax.vmap(place_waveform_at_time)(waveforms_per_source, indices_per_source)
+            return jax.vmap(place_waveform_at_time, in_axes = (0, 0, None, None) )(waveforms_per_source, indices_per_source,K_plus, K_cross)
 
         # NOTE: this is a 2 nested vmap, its just done like this right now for readability and debugging. 
         # Vmap over sources to get final tf_grid with shape (num_sources, num_times, num_freq)
-        tf_grid = jax.vmap(process_source)(
+        tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
             waveform_storage_transposed,
-            frequency_indices_transposed
+            frequency_indices_transposed,
+            K_plus_lms,
+            K_cross_lms
         ) # vmap over *SOURCES*
 
-        # Now i need to add the spherical harmonic computations to 
+        # Rotate by polarization angle psi for each source (applied to all modes in the same way)
+        tf_grid_plus, tf_grid_cross = jax.vmap(self.rotate_by_polarization_angle)(
+            tf_grid_plus, tf_grid_cross, wf_params.psi
+        )
+        
 
-        return(tf_grid) #(time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
+        return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
         
     
