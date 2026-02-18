@@ -621,7 +621,7 @@ class IMRPhenomTHM:
         times = mass_to_second(times, wf_params.total_mass)
 
         return times, mask, h_lms
-    
+
     def compute_strain_components(
         self,
         m1: float | Array,
@@ -724,8 +724,8 @@ class IMRPhenomTHM:
 
         strain_components = h_lms * y_lms
 
-        return times, mask, strain_components  
-    
+        return times, mask, strain_components
+
     def compute_strain_components_amp_phase(
         self,
         m1: float | Array,
@@ -813,7 +813,9 @@ class IMRPhenomTHM:
         )
 
         amplitudes = jnp.abs(strain_components)
-        phases = jnp.unwrap(jnp.angle(strain_components)) # todo check the sign convention here
+        phases = jnp.unwrap(
+            jnp.angle(strain_components)
+        )  # todo check the sign convention here
 
         return times, mask, amplitudes, phases
 
@@ -902,7 +904,6 @@ class IMRPhenomTHM:
             T,
         )
 
-        
         # breakpoint()
         strain = jnp.sum(strain_components, axis=1)
         h_plus = jnp.real(strain)
@@ -1292,6 +1293,7 @@ class IMRPhenomTHM:
                 wf_params.eta,
                 wf_params.Mt_min,
                 wf_params.Mt_end,
+                wf_params.Mdelta_t,
                 max_steps=self._max_adaptive_steps,
             )
 
