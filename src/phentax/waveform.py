@@ -454,7 +454,7 @@ class IMRPhenomTHM:
         t_min: float = jnp.nan,
         t_ref: float = jnp.nan,
         T: float | None = None,
-    ) -> tuple[Array, Array, Array]:
+    ) -> tuple[WaveformParams, Array, Array, Array, Array]:
         """
         Generate amplitude and phase for all modes for a batch of binaries or a single input.
 
