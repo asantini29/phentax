@@ -1102,7 +1102,7 @@ class IMRPhenomTHM_TF:
 
         return wf_params, amplitude_coeffs_22, phase_coeffs_22
 
-    # @jax.jit(static_argnums=[0,16])
+    @jax.jit(static_argnums=[0,16])
     def get_tf_fresnel_waveform_vanilla_TF(self,
                                 time_grid: Array,
                                 frequency_grid: Array,
@@ -1131,7 +1131,7 @@ class IMRPhenomTHM_TF:
 
         num_sources = jnp.atleast_1d(m1).shape[0]
 
-        print("Number of sources: ", num_sources)
+        # print("Number of sources: ", num_sources)
         # Ignore times for now 
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = (
                     self.initial_processing_TF(
@@ -1152,12 +1152,12 @@ class IMRPhenomTHM_TF:
                 )
         # This is the minimum time for every waveform in the batch in mass units 
         min_time_M_units = wf_params.Mt_min 
-        print('min time M units:',min_time_M_units)
+        # print('min time M units:',min_time_M_units)
 
         #Convert every single min time to physical units (seconds) to see what is the longest waveform in absolute (real) time
         time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
 
-        print('All time min physical (s):',time_min_physical_all)
+        # print('All time min physical (s):',time_min_physical_all)
 
         # Pad to smallest min time (real units) to ensure all waveforms fit in the time grid
         min_time_s_units = jnp.min(time_min_physical_all)
@@ -1193,8 +1193,8 @@ class IMRPhenomTHM_TF:
         )  
         # Amplitudes and phases shape: [num_sources, num_modes, num_times]
         n_modes = amplitudes.shape[1]
-        print('Amplitudes shape:',amplitudes.shape)
-        print('Phases shape:',phases.shape)
+        # print('Amplitudes shape:',amplitudes.shape)
+        # print('Phases shape:',phases.shape)
        
        # Get higher order modes phase coeffs
         phase_hm_coeffs = jax.vmap(
@@ -1233,7 +1233,7 @@ class IMRPhenomTHM_TF:
         frequency_indices_storage = jnp.zeros((time_grid.size,num_sources,n_modes,2*closest_f_bins), dtype=jnp.int32)
 
         #tf grid 
-        tf_grid = jnp.zeros((num_sources,time_grid.size, frequency_grid.size), dtype=jnp.complex128)
+        # tf_grid = jnp.zeros((num_sources,time_grid.size, frequency_grid.size), dtype=jnp.complex128)
 
         # In principle can also be vmapped over time steps here, however I think it would be completely unreadable and a nightmare to debug/maintain.. 
         for time_index in range(time_grid.size - 1):  # -1 to avoid index out of bounds with t_1
@@ -1289,8 +1289,8 @@ class IMRPhenomTHM_TF:
                 # Convert f_0 and f_dot to Hz and Hz^2 respectively
                 f_0 = jax.vmap(mass_to_hz, in_axes=(0, 0))(f_0, wf_params.total_mass)
                 f_dot = jax.vmap(df_dt_to_Hz_squared, in_axes=(0, 0))(f_dot, wf_params.total_mass)
-                print('F0 (Hz) shape:', f_0.shape) 
-                print('F dot (Hz^2) shape:', f_dot.shape)
+                # print('F0 (Hz) shape:', f_0.shape) 
+                # print('F dot (Hz^2) shape:', f_dot.shape)
 
                 # NOTE: the potential for frequencies around f0 going out of bounds is dealt with later. 
 
@@ -1300,7 +1300,7 @@ class IMRPhenomTHM_TF:
                 # Closest frequency shape is (num_sources, num_modes) and closest frequency indexes is also (num_sources, num_modes). 
                 # Same shape as f_0 and f_dot
 
-                print('Closest frequency indexes shape:', closest_frequency_indexes.shape,closest_frequency_indexes.flatten().shape)
+                # print('Closest frequency indexes shape:', closest_frequency_indexes.shape,closest_frequency_indexes.flatten().shape)
 
                 # for every frequency in closest_frequencies, generate a frequency array around it +/- closest_f_bins by going in steps of dF
                 frequencies = jax.vmap(
@@ -1319,10 +1319,10 @@ class IMRPhenomTHM_TF:
                     )+ indices - closest_f_bins, # Starting from indices - closest_f_bins to indices + closest_f_bins
                 )(closest_frequency_indexes.flatten()).reshape(num_sources,n_modes,2*closest_f_bins)
 
-                print('Frequencies shape:', frequencies.shape)
-                print('Frequencies:', frequencies)
-                print('Frequency indices shape:', frequency_indices.shape)
-                print('Frequency indices:', frequency_indices)
+                # print('Frequencies shape:', frequencies.shape)
+                # print('Frequencies:', frequencies)
+                # print('Frequency indices shape:', frequency_indices.shape)
+                # print('Frequency indices:', frequency_indices)
                 
                 # The newaxis here is accounting for the frequency dimension, 
                 #     remember we generated a single A, f, f_dot for each source and mode,
@@ -1449,7 +1449,7 @@ class IMRPhenomTHM_TF:
             tf_grid_plus, tf_grid_cross, wf_params.psi
         )
         
-
+        
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
         
