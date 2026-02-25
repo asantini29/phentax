@@ -21,6 +21,7 @@ extensions = [
     "sphinx.ext.githubpages",  # Creates .nojekyll file
     "sphinx_copybutton",
     "myst_parser",
+    "nbsphinx",
 ]
 
 templates_path = ["_templates"]

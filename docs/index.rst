@@ -5,8 +5,14 @@ Welcome to Phentax's documentation!
    :parser: myst_parser.sphinx_
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 4
+   :caption: Documentation:
 
    api
    license
+
+.. toctree::
+  :maxdepth: 4
+  :caption: Tutorial:
+
+  tutorial

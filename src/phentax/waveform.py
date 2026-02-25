@@ -72,6 +72,8 @@ class IMRPhenomTHM:
         Absolute tolerance for the t(f) root finding.
     rtol : float, default 1e-12
         Relative tolerance for the t(f) root finding.
+    T : float | None, default None
+        Total observation time in seconds. If None, it will be set to 3 months.
     """
 
     def __init__(
@@ -83,6 +85,7 @@ class IMRPhenomTHM:
         t_low_fit: bool = True,  # Use default fit for t_low if True.
         atol: float = 1e-12,
         rtol: float = 1e-12,
+        T: float | None = None,
         # todo add time options. return interpolant / dense array / sparse array
     ):
         """
@@ -144,6 +147,27 @@ class IMRPhenomTHM:
 
         self.atol = atol
         self.rtol = rtol
+
+        if T is None:
+            logger.debug("Total observation time not specified. Setting to 3 months.")
+            self.T = 3.0 / 12.0 * YRSID_SI
+        else:
+            self.T = T
+
+    def __repr__(self):
+        return (
+            "IMRPhenomTHM(higher_modes=%s, include_negative_modes=%s, coarse_grain=%s, use_splines=%s, t_low=%s, atol=%s, rtol=%s, T=%s)"
+            % (
+                self.higher_modes,
+                self.include_negative_modes,
+                self.coarse_grain,
+                self.use_splines,
+                self.t_low,
+                self.atol,
+                self.rtol,
+                self.T,
+            )
+        )
 
     @jax.jit(static_argnames="self")
     def _compute_coeffs_22(
@@ -424,7 +448,7 @@ class IMRPhenomTHM:
         h_modes = amplitudes * jnp.exp(-1j * phases)
         return h_modes
 
-    def compute_hlms(
+    def compute_amp_phase(
         self,
         m1: float | Array,
         m2: float | Array,
@@ -439,9 +463,10 @@ class IMRPhenomTHM:
         delta_t: float = 15.0,
         t_min: float = jnp.nan,
         t_ref: float = jnp.nan,
+        T: float | None = None,
     ) -> tuple[Array, Array, Array]:
         """
-        Generate complex strain :math:`h_{lm}` for all modes for a single input binary.
+        Generate amplitude and phase for all modes for a batch of binaries or a single input.
 
         Parameters
         ----------
@@ -471,15 +496,20 @@ class IMRPhenomTHM:
             Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
         t_ref : float, default jnp.nan
             Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
-
+        T : float | None, default None
+            Total observation time in seconds. If set, it overrides the default value.
         Returns
         -------
+        wf_params : WaveformParams
+            Waveform parameters of the binary.
         times : Array
             Time array in seconds.
         mask : Array
             Boolean mask indicating valid time points.
-        h_lms : Array
-            Complex strain arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        amplitudes : Array
+            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        phases : Array
+            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
         """
 
         wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
@@ -497,6 +527,7 @@ class IMRPhenomTHM:
                 delta_t,
                 t_min,
                 t_ref,
+                T,  # override default total observation time
             )
         )
         amplitudes, phases = jax.vmap(self._compute_all_modes)(
@@ -507,9 +538,90 @@ class IMRPhenomTHM:
             phase_coeffs_22,
         )  # shape (Nbinaries, Nmodes, Ntimes)
 
+        return wf_params, times, mask, amplitudes, phases
+
+    def compute_hlms(
+        self,
+        m1: float | Array,
+        m2: float | Array,
+        chi1z: float | Array,
+        chi2z: float | Array,
+        distance: float | Array,
+        phi_ref: float | Array,
+        f_ref: float | Array,
+        f_min: float | Array,
+        inclination: float,
+        psi: float | Array,
+        delta_t: float = 15.0,
+        t_min: float = jnp.nan,
+        t_ref: float = jnp.nan,
+        T: float | None = None,
+    ) -> tuple[Array, Array, Array]:
+        """
+        Generate complex strain :math:`h_{lm}` for all modes for a batch of binaries or a single input.
+
+        Parameters
+        ----------
+        m1 : float | Array
+            Mass of the first black hole in solar masses.
+        m2 : float | Array
+            Mass of the second black hole in solar masses.
+        chi1z : float | Array
+            Dimensionless spin of the first black hole along the orbital angular momentum.
+        chi2z : float | Array
+            Dimensionless spin of the second black hole along the orbital angular momentum.
+        distance : float | Array
+            Luminosity distance to the binary in megaparsecs.
+        phi_ref : float | Array
+            Reference phase at frequency f_ref in radians.
+        f_ref : float | Array
+            Reference frequency in Hz.
+        f_min : float | Array
+            Minimum frequency in Hz.
+        inclination : float
+            Inclination angle of the binary in radians.
+        psi : float | Array
+            Polarization angle in radians.
+        delta_t : float, default 15.0
+            Time step for waveform generation in seconds.
+        t_min : float, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
+        t_ref : float, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        T : float | None, default None
+            Total observation time in seconds. If sets, it overrides the default value.
+
+        Returns
+        -------
+        times : Array
+            Time array in seconds.
+        mask : Array
+            Boolean mask indicating valid time points.
+        h_lms : Array
+            Complex strain arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        """
+
+        wf_params, times, mask, amplitudes, phases = self.compute_amp_phase(
+            m1,
+            m2,
+            chi1z,
+            chi2z,
+            distance,
+            phi_ref,
+            f_ref,
+            f_min,
+            inclination,
+            psi,
+            delta_t,
+            t_min,
+            t_ref,
+            T,
+        )
+
         h_lms = (
-            self.combine_amp_phase(amplitudes, phases) * wf_params.amp_factor
-        )  # [:, None, None]
+            self.combine_amp_phase(amplitudes, phases)
+            * wf_params.amp_factor[:, None, None]
+        )  #
 
         # compute negative m modes by symmetry
         if self.include_negative_modes:
@@ -535,6 +647,7 @@ class IMRPhenomTHM:
         delta_t: float = 15.0,
         t_min: float = jnp.nan,
         t_ref: float = jnp.nan,
+        T: float | None = None,
     ) -> tuple[Array, Array, Array, Array]:
         """
         Generate plus and cross polarizations from the computed modes.
@@ -567,9 +680,8 @@ class IMRPhenomTHM:
             Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
         t_ref : float, default jnp.nan
             Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
-        times : Optional[Array], default None
-            Output time array in seconds. If provided and `self.use_splines = True`, the output polarizations will be interpolated onto this time array.
-            Otherwise, the internal time arrays will be used.
+        T : float | None, default None
+            Total observation time in seconds. If sets, it overrides the default value.
 
         Returns
         -------
@@ -602,6 +714,7 @@ class IMRPhenomTHM:
             delta_t,
             t_min,
             t_ref,
+            T,
         )
 
         y_lms = spin_weighted_spherical_harmonic_all_modes(
@@ -730,6 +843,7 @@ class IMRPhenomTHM:
         delta_t: float = 15.0,
         t_min: float = jnp.nan,
         t_ref: float = jnp.nan,
+        T: float | None = None,
     ) -> tuple[Array, Array, Array, Array]:
         """
         Generate plus and cross polarizations, but computing the :math:`h_{lm}` individually for each mode to save memory.
@@ -762,8 +876,8 @@ class IMRPhenomTHM:
             Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
         t_ref : float, default jnp.nan
             Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
-        times : Optional[Array], default None
-            Output time array in seconds. If provided and `self.use_splines = True`, the output polarizations will be interpolated onto this time array.
+        T : float | None, default None
+            Total observation time in seconds. If set, it overrides the default value.
 
         Returns
         -------
@@ -776,6 +890,7 @@ class IMRPhenomTHM:
         h_cross_out : Array
             Cross polarization strain.
         """
+
         wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
             self.initial_processing(
                 m1,
@@ -791,6 +906,7 @@ class IMRPhenomTHM:
                 delta_t,
                 t_min,
                 t_ref,
+                T,
             )
         )
 
@@ -883,8 +999,8 @@ class IMRPhenomTHM:
         h_cross_rotated : Array
             Rotated cross polarization strain.
         """
-        cos_2psi = jnp.cos(2.0 * psi)
-        sin_2psi = jnp.sin(2.0 * psi)
+        cos_2psi = jnp.atleast_1d(jnp.cos(2.0 * jnp.array(psi)))[:, None]
+        sin_2psi = jnp.atleast_1d(jnp.sin(2.0 * jnp.array(psi)))[:, None]
 
         h_plus_rotated = h_plus * cos_2psi - h_cross * sin_2psi
         h_cross_rotated = h_plus * sin_2psi + h_cross * cos_2psi
@@ -972,6 +1088,7 @@ class IMRPhenomTHM:
     def get_time_grids(
         self,
         wf_params: WaveformParams,
+        num_steps: int,
     ) -> tuple[Array, Array]:
         """
         Generate the time grid for waveform generation based on waveform parameters.
@@ -980,6 +1097,9 @@ class IMRPhenomTHM:
         ----------
         wf_params : WaveformParams
             Waveform parameters of the binary.
+        num_steps : int
+            Number of steps for the time grid. This is used to allocate memory for the time grid,
+            and it ensures all the binaries in the batch have the same number of steps.
 
         Returns
         -------
@@ -988,14 +1108,13 @@ class IMRPhenomTHM:
         mask : Array
             Boolean mask indicating valid time points.
         """
-        max_steps = int(jnp.max(jnp.atleast_1d(wf_params.length)))
 
         if self.coarse_grain:
             times, mask = generate_adaptive_grid(
                 wf_params.eta,
                 wf_params.Mt_min,
                 wf_params.Mt_end,
-                max_steps=max_steps // 2,  # allocate half steps for adaptive grid
+                max_steps=num_steps // 2,  # allocate half steps for adaptive grid
             )
 
         else:
@@ -1003,7 +1122,7 @@ class IMRPhenomTHM:
                 wf_params.Mt_min,
                 wf_params.Mt_end,
                 wf_params.Mdelta_t,
-                max_steps=max_steps,
+                max_steps=num_steps,
             )
 
         return times, mask
@@ -1023,12 +1142,11 @@ class IMRPhenomTHM:
         delta_t: float | Array = 15.0,
         t_min: float | Array = jnp.nan,
         t_ref: float | Array = jnp.nan,
+        T: float | None = None,
     ) -> tuple[WaveformParams, Array, Array, AmplitudeCoeffs, PhaseCoeffs]:
         """
         Initial processing to compute waveform parameters and time grids.
 
-        Parameters
-        ----------
         Parameters
         ----------
         m1 : float | Array
@@ -1051,12 +1169,14 @@ class IMRPhenomTHM:
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
-        delta_t : float | Array, default 5.0
+        delta_t : float | Array, default 15.0
             Time step for waveform generation in seconds.
         t_min : float | Array, default jnp.nan
             Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
         t_ref : float | Array, default jnp.nan
             Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        T : float | None, default None
+            Total observation time in seconds. If sets, it overrides the default value.
 
         Returns
         -------
@@ -1072,6 +1192,14 @@ class IMRPhenomTHM:
         phase_coeffs_22 : PhaseCoeffs
             Phase coefficients for the (2,2) mode.
         """
+
+        # throw an error if any of the two spins is larger than 1
+        assert jnp.all(
+            jnp.abs(jnp.atleast_1d(chi1z)) <= 1
+        ), "Spin must be between -1 and 1"
+        assert jnp.all(
+            jnp.abs(jnp.atleast_1d(chi2z)) <= 1
+        ), "Spin must be between -1 and 1"
 
         wf_params = self._process_parameters(
             m1,
@@ -1092,7 +1220,12 @@ class IMRPhenomTHM:
             self._compute_coeffs_22
         )(wf_params)
 
-        times, times_mask = self.get_time_grids(wf_params)
+        if T is None:
+            T = self.T
+
+        num_steps = int(jnp.ceil(T / delta_t))
+
+        times, times_mask = self.get_time_grids(wf_params, num_steps)
 
         return wf_params, times, times_mask, amplitude_coeffs_22, phase_coeffs_22
 

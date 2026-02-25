@@ -1,11 +1,11 @@
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/srstevenson/nb-clean
-    rev: 4.0.1
-    hooks:
-      - id: nb-clean
-        name: clean notebooks
-        args: [--remove-empty-cells, --remove-all-notebook-metadata]
+  # - repo: https://github.com/srstevenson/nb-clean
+  #   rev: 4.0.1
+  #   hooks:
+  #     - id: nb-clean
+  #       name: clean notebooks
+  #       args: [--remove-empty-cells, --remove-all-notebook-metadata]
   - repo: https://github.com/hadialqattan/pycln
     rev: v2.5.0
     hooks:

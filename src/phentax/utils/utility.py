@@ -298,7 +298,7 @@ def mass_to_second(t_m: float | Array, total_mass: float | Array) -> float | Arr
     float | Array
         Time in seconds.
     """
-    return t_m * total_mass * MTSUN_SI
+    return t_m * total_mass[:, None] * MTSUN_SI
 
 
 @jax.jit

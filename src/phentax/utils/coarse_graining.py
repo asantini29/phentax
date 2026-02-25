@@ -16,7 +16,6 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 
-@jax.jit
 def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array:
     """
     Compute adaptive time step at leading order in omega.

@@ -9,6 +9,7 @@ Constants
 
 Physical constants and conversion factors.
 """
+import lisaconstants as lc
 
 # Physical constants in SI units
 MSUN_SI = 1.988409902147041637325262574352366540e30  # Solar mass [kg]
@@ -20,3 +21,6 @@ G_SI = 6.67430e-11  # Gravitational constant [m^3/(kg*s^2)]
 
 # Conversion factors
 MPC_TO_M = 1e6 * PC_SI  # Megaparsec to meters
+
+# year
+YRSID_SI = lc.ASTRONOMICAL_YEAR
