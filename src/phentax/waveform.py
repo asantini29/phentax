@@ -10,6 +10,7 @@ Waveform
 IMRPhenomTHM interface class for waveform generation.
 """
 
+from statistics import mode
 from typing import Optional
 
 import jax
@@ -26,6 +27,8 @@ from phentax.core import (
     compute_phase_coeffs_hm,
     imr_amplitude,
     imr_phase,
+    imr_omega,
+    imr_omega_dot,
 )
 from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.coarse_graining import (
@@ -34,8 +37,7 @@ from phentax.utils.coarse_graining import (
     masked_evaluate,
 )
 from phentax.utils.config import setup_logging
-from phentax.utils.constants import YRSID_SI
-from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm
+from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm,second_to_mass, mass_to_hz, df_dt_to_Hz_squared
 from phentax.utils.ylm import (
     spin_weighted_spherical_harmonic,
     spin_weighted_spherical_harmonic_all_modes,
@@ -45,6 +47,7 @@ logger = setup_logging(__name__)
 
 ALLOWED_POSITIVE_HMS = [21, 33, 44, 55]
 
+import scipy
 
 class IMRPhenomTHM:
     """
@@ -253,6 +256,31 @@ class IMRPhenomTHM:
         )
 
         return amplitude_22[None, :], phase_22[None, :]
+    
+    @jax.jit(static_argnames="self")
+    def _compute_phase_coeffs_hm(
+        self,
+        mode: int | Array,
+        wf_params: WaveformParams,
+        phase_coeffs_22: PhaseCoeffs,
+    ) -> tuple[Array]:
+        """
+        Utility function to compute phase coefficients for a given higher mode (beyond 22).
+        """
+        
+        m = mode % 10
+        print('MODE GOING INTO BRANCH: ',mode)
+        amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
+        phase_coeffs = compute_phase_coeffs_hm(
+                wf_params,
+                phase_coeffs_22,
+                OmegaCutPNAMP=amplitude_coeffs.omegaCutPNAMP,
+                PhiCutPNAMP=amplitude_coeffs.phiCutPNAMP,
+                mode=mode,
+            )
+            
+    
+        return(phase_coeffs)
 
     @jax.jit(static_argnames="self")
     def _compute_amp_phase_hm(
@@ -292,7 +320,6 @@ class IMRPhenomTHM:
         """
 
         m = mode % 10
-
         amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
         phase_coeffs = compute_phase_coeffs_hm(
             wf_params,
@@ -398,6 +425,9 @@ class IMRPhenomTHM:
         )  # shape (Nmodes, Ntimes)
 
         return all_amplitudes, all_phases
+    
+
+    
 
     @jax.jit(static_argnames="self")
     def combine_amp_phase(self, amplitudes: Array, phases: Array) -> Array:
@@ -1198,3 +1228,187 @@ class IMRPhenomTHM:
         times, times_mask = self.get_time_grids(wf_params, num_steps)
 
         return wf_params, times, times_mask, amplitude_coeffs_22, phase_coeffs_22
+
+    def get_tf_fresnel_waveform(self,
+                                time_grid: Array,
+                                frequency_grid: Array,
+                                m1: float | Array,
+                                m2: float | Array,
+                                chi1z: float | Array,
+                                chi2z: float | Array,
+                                distance: float | Array,
+                                phi_ref: float | Array,
+                                f_ref: float | Array,
+                                f_min: float | Array,
+                                inclination: float,
+                                psi: float | Array,
+                                delta_t: float = 15.0,
+                                t_min: float = jnp.nan,
+                                t_ref: float = jnp.nan,
+                                closest_f_bins: int = 10,
+                                time_of_projections : float | Array = 0.0,
+                            ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
+
+        """
+        Placeholder for future implementation of time-frequency Fresnel waveform generation.
+        """
+
+        num_sources = jnp.atleast_1d(m1).shape[0]
+        print("Number of sources: ", num_sources)
+        # Ignore times for now 
+        wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
+                    self.initial_processing(
+                        m1,
+                        m2,
+                        chi1z,
+                        chi2z,
+                        distance,
+                        phi_ref,
+                        f_ref,
+                        f_min,
+                        inclination,
+                        psi,
+                        delta_t,
+                        t_min,
+                        t_ref,
+                    )
+                )
+        
+        # amplitudes_, phases_ = jax.vmap(self._compute_all_modes)(
+        #     times,
+        #     mask,
+        #     wf_params,
+        #     amplitude_coeffs_22,
+        #     phase_coeffs_22,
+        # ) 
+        # print('CORRECT AMPS: ',amplitudes_)
+        
+        times_physical = mass_to_second(times, wf_params.total_mass)
+
+        # dealing with the negative times, so we can call the waveform with these negative times
+        time_grid += times_physical[0][0]
+
+        new_mask = jnp.ones_like(time_grid, dtype=bool)
+
+        time_grid_mass_units = second_to_mass(time_grid, wf_params.total_mass)
+
+        amplitudes, phases = jax.vmap(self._compute_all_modes, in_axes = (None, None, 0, 0, 0))(
+            time_grid_mass_units,
+            new_mask,
+            wf_params,
+            amplitude_coeffs_22,
+            phase_coeffs_22,
+        )  # shape (Nbinaries, Nmodes, Ntimes) 
+
+       
+
+        # print('INITIAL AMPS:', amplitudes)
+        # Vmap over sources first (to get scalar wf_params fields), then over modes
+        phase_hm_coeffs = jax.vmap(
+            lambda wp, pc22: jax.vmap(
+                lambda mode: self._compute_phase_coeffs_hm(mode, wp, pc22)
+            )(self.higher_modes)
+        )(wf_params, phase_coeffs_22)
+        
+        # Combine 22 and HM phase coeffs
+        overall_phase_coeffs = jax.tree_util.tree_map(
+            lambda p22, phm: jnp.concatenate([p22[:, None], phm], axis=1),
+            phase_coeffs_22,
+            phase_hm_coeffs,
+        )
+
+        # overall_phase_coeffs = []
+        # overall_phase_coeffs.extend([phase_coeffs_22,phase_hm_coeffs])
+        # print(overall_phase_coeffs)
+
+        # Back to sensible and positive time grid for sane people 
+        time_grid -= times_physical[0][0]
+
+        amplitudes *= wf_params.amp_factor
+   
+        # Find time at which to end the waveform for now this is at A_max_22
+        t_max_index = jnp.argmax(jnp.abs(amplitudes[:,0,:]),axis=1)
+
+        print('original mass times',times)
+
+        # tf_grid = jnp.zeros((time_grid.shape[0], frequency_grid.shape[0]), dtype=jnp.complex128)
+        tf_grid = jnp.zeros((amplitudes.shape[1],time_grid.shape[0],frequency_grid.size), dtype=jnp.complex128)
+        # Go upto the max amp time (22) or end of time grid, whichever is smaller.
+        # TEMPORARY BODGE ONLY GO UPTO THE T_MAX_INDEX FOR THE FIRST SOURCE 
+        for time_index in range(min(t_max_index[0],time_grid.size)):
+                t_0 = time_grid[time_index]
+                t_1 = time_grid[time_index+1]
+                # # Which mode!!! need to compute this for all the modes seperately. 
+                # f_0 = jax.vmap(imr_omega)(second_to_mass(t_0+times_physical[0][0], wf_params.total_mass), wf_params.eta, overall_phase_coeffs)/(2*jnp.pi)
+                # f_dot = jax.vmap(imr_omega_dot)(second_to_mass(t_0+times_physical[0][0], wf_params.total_mass), wf_params.eta, overall_phase_coeffs)/(2*jnp.pi)
+                # print('F0 AND F DOT: ',f_0,f_dot)
+                t_0_mass = second_to_mass(t_0 + times_physical[0][0], wf_params.total_mass[0])
+                print('t_0_mass:',t_0_mass,t_0,t_1)
+
+                for mode_index in range(amplitudes.shape[1]):
+                    # All (waveform batching) amplitudes and phases for this mode at this time 
+                    Amps = amplitudes[:,mode_index, time_index]
+                    Phases = phases[:,mode_index, time_index]
+
+                    # Extract phase coeffs for this mode and this binary
+                    mode_phase_coeffs = jax.tree.map(lambda x: x[0, mode_index], overall_phase_coeffs)
+                    
+                    # Compute f_0 and f_dot for this specific mode
+                    f_0 = imr_omega(t_0_mass, wf_params.eta[0], mode_phase_coeffs) / (2 * jnp.pi) 
+                    f_dot = imr_omega_dot(t_0_mass, wf_params.eta[0], mode_phase_coeffs) / (2 * jnp.pi)
+
+                    f_0 = mass_to_hz(f_0, wf_params.total_mass[0])
+
+                    if f_0 < frequency_grid[0] or f_0 > frequency_grid[-1]:
+                        continue
+
+                    f_dot = df_dt_to_Hz_squared(f_dot, wf_params.total_mass[0])
+                    # f_dot = mass_to_hz(f_dot, wf_params.total_mass[0])
+                    if mode_index == 0:
+                        print('F0 AND F DOT: ',f_0,f_dot,'22',time_index)
+                    else:
+                        print('F0 AND F DOT: ',f_0,f_dot,self.higher_modes[mode_index-1],time_index)
+
+                    # Compute frequency and frequency derivative for each source
+                    # t_0 is scalar, wf_params.eta is batched (axis 0), phase_coeffs_22 fields are batched (axis 0)
+                    # Use in_axes=(None, 0, 0) to specify: don't vmap t_0, vmap eta and phase_coeffs
+
+                    # closest_frequency_indexes = jnp.argmin(jnp.abs(jnp.repeat(frequency_grid[jnp.newaxis, :], 
+                    #                                                             num_sources, axis=0) - f_0[:, jnp.newaxis]), 
+                    #                                                             axis=1)
+
+                    # Select frequency bins around f_0, for each binary
+                    closest_frequency_indexes = jnp.argmin(jnp.abs(frequency_grid - f_0))
+
+                    # Make masks ensuring the indexes don't go out of bounds
+                    lower_mask = jnp.maximum(0, closest_frequency_indexes-closest_f_bins)
+                    upper_mask = jnp.minimum(frequency_grid.size, closest_frequency_indexes+closest_f_bins)
+
+                    f = frequency_grid[lower_mask:upper_mask]
+                    h_prefactor = Amps*jnp.exp(1j*Phases)/jnp.sqrt(2*f_dot) * jnp.exp(-1j*jnp.pi*((f_0 - f)**2)/f_dot)
+
+                    # Fresnel integral stuff
+                    v_nm_end = v(f_dot,t_0,t_1,f,f_0)
+                    v_nm_begin = v(f_dot,t_0,t_0,f,f_0)
+                    S_vn_end, C_vn_end = scipy.special.fresnel(v_nm_end)
+                    S_vn_begin, C_vn_begin = scipy.special.fresnel(v_nm_begin)
+
+                    I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+                    # print(h_prefactor,I)
+                    # Once I have figured out the positive/negative frequencies, Need to apply the transfer function here. 
+                    # tf_grid = tf_grid.at[mode_index,time_index,lower_mask:upper_mask].add(h_prefactor * (I))
+                    tf_grid = tf_grid.at[mode_index,time_index,lower_mask:upper_mask].add(h_prefactor * (I))
+
+        #             for i in range(num_sources):
+        #                 print('insanity test')
+        #                 print(h_prefactor[i] * (I[i]))
+        #                 # tf_grid = tf_grid.at[time_index,lower_mask[i]:upper_mask[i]].set(h_prefactor[i] * (I[i]))
+        #                 tf_grid = tf_grid.at[mode_index,time_index,lower_mask[i]:upper_mask[i]].add(h_prefactor[i] * (I[i]))
+        return tf_grid 
+
+        
+    
+
+def v(f_dot_0,t_0,t_1,f,f_0):
+    fresnel_argument = jnp.sqrt(2*f_dot_0)*((t_1-t_0) + (f_0-f)/f_dot_0)
+    return fresnel_argument

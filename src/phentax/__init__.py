@@ -13,7 +13,7 @@ generation for compact binary coalescences using JAX.
 # configure_jax()
 
 # Data structures
-from . import core, utils, waveform
+from . import core, utils, waveform, waveform_tf
 
 __version__ = "0.1.0"
 __copyright__ = "2025, Alessandro Santini"
