@@ -1198,7 +1198,7 @@ class IMRPhenomTHM_TF:
         # print('Phases shape:',phases.shape)
        
        # Get higher order modes phase coeffs
-        phase_hm_coeffs = jax.vmap(
+        phase_hm_coeffs,_ = jax.vmap(
             lambda wp, pc22: jax.vmap(
                 lambda mode: self._compute_phase_coeffs_hm(mode, wp, pc22)
             )(self.higher_modes)
@@ -1832,7 +1832,7 @@ class IMRPhenomTHM_TF:
         
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
-
+@jax.jit
 def v(f_dot_0,t_0,t_1,f,f_0):
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*((t_1-t_0) + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
