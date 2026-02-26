@@ -14,6 +14,7 @@ from statistics import mode
 from typing import Optional
 
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from interpax import CubicSpline
 from jaxtyping import Array
@@ -248,7 +249,7 @@ class IMRPhenomTHM_TF:
         Utility function to compute phase coefficients for a given higher mode (beyond 22).
         """
         
-        m = mode % 10
+        # m = mode % 10
         amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
         phase_coeffs = compute_phase_coeffs_hm(
                 wf_params,
@@ -258,7 +259,6 @@ class IMRPhenomTHM_TF:
                 mode=mode,
             )
             
-    
         return(phase_coeffs,amplitude_coeffs)
 
     @jax.jit(static_argnames="self")
@@ -1551,7 +1551,7 @@ class IMRPhenomTHM_TF:
         # print('Phases shape:',phases.shape)
        
        # Get higher order modes phase coeffs
-        phase_hm_coeffs, amplitude_coeffs = jax.vmap(
+        phase_hm_coeffs, amplitude_hm_coeffs = jax.vmap(
             lambda wp, pc22: jax.vmap(
                 lambda mode: self._compute_phase_coeffs_hm(mode, wp, pc22)
             )(self.higher_modes)
@@ -1569,7 +1569,7 @@ class IMRPhenomTHM_TF:
         overall_amplitude_coeffs = jax.tree_util.tree_map(
             lambda a22, ahm: jnp.concatenate([a22[:, None], ahm], axis=1),
             amplitude_coeffs_22,
-            amplitude_coeffs,
+            amplitude_hm_coeffs,
         )
 
         # print('Phase overall coeffs:',overall_phase_coeffs)
@@ -1653,10 +1653,16 @@ class IMRPhenomTHM_TF:
                 # print('F dot (Hz^2) shape:', f_dot.shape)
 
                 A_dot_0 = jax.vmap(
-                    lambda t, eta, a_coeffs, p_coeffs: jax.vmap(lambda a: imr_amplitude_dot(t, eta, a, p_coeffs))(a_coeffs)
-                )(t_0_mass, wf_params.eta, overall_amplitude_coeffs, phase_coeffs_22) * wf_params.amp_factor[:, None] # Shape (num_sources, num_modes) # amp_factor has shapr (num_sources,) so we add a new axis for modes to allow for broadcasting.
-                print('A_dot_0 shape:', A_dot_0.shape)
-                print('A_dot_0/Amps:', A_dot_0/Amps)
+                    lambda t, eta, a_coeffs, p_coeffs, amp_factor: jax.vmap(lambda a: imr_amplitude_dot(t, eta, a, p_coeffs))(a_coeffs) * amp_factor    
+                )(t_0_mass, wf_params.eta, overall_amplitude_coeffs, phase_coeffs_22, wf_params.amp_factor) #* wf_params.amp_factor[:, None] # Shape (num_sources, num_modes) # amp_factor has shapr (num_sources,) so we add a new axis for modes to allow for broadcasting.
+                
+                # NOTE since t is in mass units this is still in mass units for the time so we need to convert back to seconds!
+                
+                # Note we use mass_to_hz here as its basically 1/M, which is the transformation we want since dA/dt_{s} = dA/dt_{M} * dt_{M}/dt_{s} and dt_{M}/dt_{s} is basically 1/M (up to factors of G and c which we set to 1).
+                A_dot_0 = jax.vmap(mass_to_hz, in_axes=(0, 0))(A_dot_0, wf_params.total_mass) # Convert A_dot_0 to physical units (seconds) for each source and mode. Still shape (num_sources, num_modes)  
+                
+                # print('A_dot_0 shape:', A_dot_0.shape)
+                # print('A_dot_0:', A_dot_0)
 
                 # NOTE: the potential for frequencies around f0 going out of bounds is dealt with later. 
 
@@ -1664,7 +1670,7 @@ class IMRPhenomTHM_TF:
                 # Uniform grid → direct arithmetic instead of materializing an (nSrc, nMode, nFreq) tensor
                 closest_frequency_indexes = jnp.round((f_0 - frequency_grid[0]) / dF).astype(jnp.int32)
                 closest_frequency_indexes = jnp.clip(closest_frequency_indexes, 0, frequency_grid.size - 1)
-                closest_frequencies = frequency_grid[closest_frequency_indexes]
+                closest_frequencies = frequency_grid[closest_frequency_indexes] 
                 # Closest frequency shape is (num_sources, num_modes) and closest frequency indexes is also (num_sources, num_modes). 
                 # Same shape as f_0 and f_dot
 
@@ -1692,13 +1698,6 @@ class IMRPhenomTHM_TF:
                 # print('Frequency indices shape:', frequency_indices.shape)
                 # print('Frequency indices:', frequency_indices)
                 
-                # The newaxis here is accounting for the frequency dimension, 
-                #     remember we generated a single A, f, f_dot for each source and mode,
-                #      but now we have an array of frequencies for each source and mode, so we need to add a new axis to Amps,
-                #      Phases, f_0 and f_dot to allow for broadcasting when computing the waveform values for each frequency.
-                
-                # h_prefactor = Amps[:,:,jnp.newaxis]*jnp.exp(1j*Phases[:,:,jnp.newaxis])/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * jnp.exp(-1j*jnp.pi*((f_0[:,:,jnp.newaxis] - frequencies)**2)/f_dot[:,:,jnp.newaxis])
-
                 # Fresnel integral stuff (all )
                 v_nm_end = v(f_dot,t_0,t_1,frequencies,f_0)
                 v_nm_begin = v(f_dot,t_0,t_0,frequencies,f_0)
@@ -1712,17 +1711,46 @@ class IMRPhenomTHM_TF:
                 delta_c = jnp.cos(jnp.pi/2*v_nm_end**2)- jnp.cos(jnp.pi/2*v_nm_begin**2)
 
                 I_prime = delta_s - 1j * delta_c
+
                 
                 waveform = jnp.exp(1j*Phases[:,:,jnp.newaxis])*jnp.exp(-1j*jnp.pi*((f_0[:,:,jnp.newaxis] - frequencies)**2)/f_dot[:,:,jnp.newaxis])*(
-                    Amps[:,:,jnp.newaxis]/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * I + 
-                    A_dot_0[:,:,jnp.newaxis]/(2*jnp.pi*f_dot[:,:,jnp.newaxis]) * I_prime -
-                    A_dot_0[:,:,jnp.newaxis]*(f_0[:,:,jnp.newaxis]-frequencies)/(jnp.sqrt(2)*(f_dot[:,:,jnp.newaxis])**(3/2))*I
+                    Amps[:,:,jnp.newaxis]/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * I + # Basic fresnel contribution 
+                    A_dot_0[:,:,jnp.newaxis]/(2*jnp.pi*f_dot[:,:,jnp.newaxis]) * I_prime - # Contribution from amplitude variation (A_dot term)
+                    A_dot_0[:,:,jnp.newaxis]*(f_0[:,:,jnp.newaxis]-frequencies)/(jnp.sqrt(2)*(f_dot[:,:,jnp.newaxis])**(3/2))* I # Contribution from amplitude variation (f_0 dot term)
                 )
+
+                # print('Relative importance: ')
+                # print('Basic Fresnel term vs both A_dot term:', 
+                #       jnp.abs(Amps[:,:,jnp.newaxis]/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * I) / jnp.abs(A_dot_0[:,:,jnp.newaxis]/(2*jnp.pi*f_dot[:,:,jnp.newaxis]) * I_prime - A_dot_0[:,:,jnp.newaxis]*(f_0[:,:,jnp.newaxis]-frequencies)/(jnp.sqrt(2)*(f_dot[:,:,jnp.newaxis])**(3/2))* I))
                 
-                # Store each waveform in its own 'tf grid' for now. 
-                # NOTE: Final implementation will use something much closer to the direct likelihood/inner product computation. Maybe....
-                # NOTE: In its current form this is *NOT* the actual TF grid, the frequency axis has not yet been placed in the correct position,
-                #         we are just storing the waveforms for each time step and each mode in a temporary array here, 
+                # # Explicit loop over sources and modes for Fresnel sum
+                # waveform = jnp.zeros((num_sources, n_modes, 2*closest_f_bins), dtype=jnp.complex128)
+                # for i in range(num_sources):
+                #     for j in range(n_modes):
+                #         phase = Phases[i, j]
+                #         amp = Amps[i, j]
+                #         fdot = f_dot[i, j]
+                #         f0 = f_0[i, j]
+                #         adot = A_dot_0[i, j]
+                #         freq_arr = frequencies[i, j]
+                #         # Fresnel integrals for this (source, mode)
+                #         v_nm_end_ij = v_serial(fdot, t_0, t_1, freq_arr, f0)
+                #         v_nm_begin_ij = v_serial(fdot, t_0, t_0, freq_arr, f0)
+                #         S_vn_end_ij, C_vn_end_ij = jax.scipy.special.fresnel(v_nm_end_ij)
+                #         S_vn_begin_ij, C_vn_begin_ij = jax.scipy.special.fresnel(v_nm_begin_ij)
+                #         I_ij = C_vn_end_ij - C_vn_begin_ij + 1j * (S_vn_end_ij - S_vn_begin_ij)
+                #         delta_s_ij = jnp.sin(jnp.pi/2 * v_nm_end_ij**2) - jnp.sin(jnp.pi/2 * v_nm_begin_ij**2)
+                #         delta_c_ij = jnp.cos(jnp.pi/2 * v_nm_end_ij**2) - jnp.cos(jnp.pi/2 * v_nm_begin_ij**2)
+                #         I_prime_ij = delta_s_ij - 1j * delta_c_ij
+                #         exp_phase = jnp.exp(1j * phase)
+                #         exp_quad = jnp.exp(-1j * jnp.pi * ((f0 - freq_arr)**2) / fdot)
+                #         term1 = amp / jnp.sqrt(2 * fdot) * I_ij
+                #         term2 = adot / (2 * jnp.pi * fdot) * I_prime_ij
+                #         term3 = -adot * (f0 - freq_arr) / (jnp.sqrt(2) * (fdot**(3/2))) * I_ij
+                #         waveform_ij = exp_phase * exp_quad * (term1 + term2 + term3)
+                #         waveform = waveform.at[i, j, :].set(waveform_ij)
+
+                # Store each waveform in its own 'tf grid' for now.
                 waveform_storage = waveform_storage.at[time_index,:,:,:].set(waveform)
 
                 # Store the corresponding frequency indices for each waveform value, which will be used to place the values in the correct position in the final tf grid.
@@ -1832,7 +1860,14 @@ class IMRPhenomTHM_TF:
         
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
+
 @jax.jit
 def v(f_dot_0,t_0,t_1,f,f_0):
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*((t_1-t_0) + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
+    return fresnel_argument
+
+# Non-vectorized version for use inside explicit loops
+def v_serial(f_dot_0, t_0, t_1, f, f_0):
+    # All inputs are scalars or 1D arrays (f)
+    fresnel_argument = jnp.sqrt(2 * f_dot_0) * ((t_1 - t_0) + (f_0 - f) / f_dot_0)
     return fresnel_argument
