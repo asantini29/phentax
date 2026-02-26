@@ -762,7 +762,7 @@ def imr_omega_dot(
     Returns
     -------
     Array
-        Phase value(s) at the given time(s).
+        Phase derivative value(s) at the given time(s).
     """
     domega_dt = jax.grad(lambda t: imr_omega(t, eta, phase_coeffs))(time)
     return domega_dt
