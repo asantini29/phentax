@@ -10,6 +10,7 @@ from .amplitude import (
     compute_amplitude_coeffs_22,
     compute_amplitude_coeffs_hm,
     imr_amplitude,
+    imr_amplitude_dot
 )
 from .phase import (
     PhaseCoeffs,
@@ -17,5 +18,5 @@ from .phase import (
     compute_phase_coeffs_hm,
     imr_phase,
     imr_omega,
-    imr_omega_dot
+    imr_omega_dot,
 )

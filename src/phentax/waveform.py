@@ -37,6 +37,7 @@ from phentax.utils.coarse_graining import (
     masked_evaluate,
 )
 from phentax.utils.config import setup_logging
+from phentax.utils.constants import YRSID_SI
 from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm,second_to_mass, mass_to_hz, df_dt_to_Hz_squared
 from phentax.utils.ylm import (
     spin_weighted_spherical_harmonic,

@@ -793,7 +793,7 @@ def imr_amplitude_dot(
     Array
         Computed amplitude time derivative at the given times.
     """
-    dA_dt = jax.grad(lambda t: imr_amplitude(t, eta, amp_coeffs, phase_coeffs_22))(time)
+    _,dA_dt = jax.jvp(lambda t: imr_amplitude(t, eta, amp_coeffs, phase_coeffs_22), (time,), (jnp.ones_like(time),))
     return dA_dt
 
 
