@@ -61,8 +61,6 @@ class IMRPhenomTHM:
         Whether to include negative m modes by symmetry.
     coarse_grain : bool, default False
         Whether to use adaptive coarse-graining for time grid generation.
-    use_splines : bool, default False
-        Whether to use cubic spline interpolation for output waveforms.
     t_low_fit : bool, default True
         Whether to use the default fit for t_low in t(f).
     atol : float, default 1e-12
@@ -78,17 +76,12 @@ class IMRPhenomTHM:
         higher_modes: Optional[Array | list | str] = "all",
         include_negative_modes: bool = True,
         coarse_grain: bool = False,
-        use_splines: bool = False,
         t_low_fit: bool = True,  # Use default fit for t_low if True.
         atol: float = 1e-12,
         rtol: float = 1e-12,
         T: float | None = None,
         # todo add time options. return interpolant / dense array / sparse array
     ):
-        """
-        Initialize the IMRPhenomTHM waveform generator.
-        """
-
         if higher_modes is None:
             self.higher_modes = jnp.array([])
             self.has_hm = False
@@ -132,9 +125,6 @@ class IMRPhenomTHM:
         self.coarse_grain = coarse_grain
         logger.debug("Coarse graining set to %s", self.coarse_grain)
 
-        self.use_splines = use_splines
-        logger.debug("Using splines set to %s", self.use_splines)
-
         if t_low_fit:
             logger.debug("Using fit in t(f): t_low = - 0.015 * f^(-2.7)")
             self.t_low = 0.0  # will be set in get_time_of_frequency
@@ -153,12 +143,11 @@ class IMRPhenomTHM:
 
     def __repr__(self):
         return (
-            "IMRPhenomTHM(higher_modes=%s, include_negative_modes=%s, coarse_grain=%s, use_splines=%s, t_low=%s, atol=%s, rtol=%s, T=%s)"
+            "IMRPhenomTHM(higher_modes=%s, include_negative_modes=%s, coarse_grain=%s, t_low=%s, atol=%s, rtol=%s, T=%s)"
             % (
                 self.higher_modes,
                 self.include_negative_modes,
                 self.coarse_grain,
-                self.use_splines,
                 self.t_low,
                 self.atol,
                 self.rtol,
@@ -656,19 +645,13 @@ class IMRPhenomTHM:
         Returns
         -------
         times : Array
-            Time array in seconds. If `self.use_splines = True` and `times` is provided, this will be the provided time array.
-            If `self.use_splines = True` and `times` is None, this will be the internal time array used for waveform generation.
-            If `self.use_splines = False`, this will be the internal time array used for waveform generation.
+            Time array in seconds.
         mask : Array
-            Boolean mask indicating valid time points. To be used only if `self.use_splines = False`.
-        h_plus : Array | CubicSpline
-            Plus polarization strain. If `self.use_splines = True` and `times` is `None`, this will be a CubicSpline object representing the interpolated strain.
-            If `self.use_splines = True` and `times` is provided, this will be the interpolated strain evaluated at the provided times.
-            If `self.use_splines = False`, this will be the strain evaluated at the internal time array.
-        h_cross : Array | CubicSpline
-            Cross polarization strain. If `self.use_splines = True` and `times` is `None`, this will be a CubicSpline object representing the interpolated strain.
-            If `self.use_splines = True` and `times` is provided, this will be the interpolated strain evaluated at the provided times.
-            If `self.use_splines = False`, this will be the strain evaluated at the internal time array.
+            Boolean mask indicating valid time points.
+        h_plus : Array
+            Plus polarization strain.
+        h_cross : Array
+            Cross polarization strain.
         """
         times, mask, h_lms = self.compute_hlms(
             m1,
@@ -906,42 +889,6 @@ class IMRPhenomTHM:
         times_sec = mass_to_second(times, wf_params.total_mass)
 
         return times_sec, mask, h_plus, h_cross
-
-    def spline_polarizations(
-        self,
-        times: Array,
-        h_plus: Array,
-        h_cross: Array,
-    ) -> tuple[Array, Array]:
-        """
-        Interpolate plus and cross polarizations onto a given time array using cubic splines.
-
-        Parameters
-        ----------
-        times : Array
-            Time array in seconds to interpolate onto.
-        h_plus : Array
-            Plus polarization strain.
-        h_cross : Array
-            Cross polarization strain.
-
-        Returns
-        -------
-        h_plus_interp : Array
-            Interpolated plus polarization strain.
-        h_cross_interp : Array
-            Interpolated cross polarization strain.
-        """
-        h_plus_splines = jax.vmap(lambda t, hp: CubicSpline(t, hp))(times, h_plus)
-        h_cross_splines = jax.vmap(lambda t, hc: CubicSpline(t, hc))(times, h_cross)
-
-        if times is None:
-            return h_plus_splines, h_cross_splines
-
-        h_plus_interp = jax.vmap(lambda spl: spl(times))(h_plus_splines)
-        h_cross_interp = jax.vmap(lambda spl: spl(times))(h_cross_splines)
-
-        return h_plus_interp, h_cross_interp
 
     @jax.jit(static_argnames="self")
     def rotate_by_polarization_angle(

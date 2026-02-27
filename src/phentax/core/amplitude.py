@@ -771,7 +771,8 @@ def imr_amplitude_dot(
     eta: Array,
     amp_coeffs: AmplitudeCoeffs,
     phase_coeffs_22: PhaseCoeffs,
-) -> Array:
+    return_amplitude: bool = False,
+) -> Array | Tuple[Array, Array]:
     """
     Compute the IMR amplitude time derivative :math:`\\dot{A}(t)` at given times for a specific mode, using JAX automatic differentiation.
 
@@ -785,14 +786,24 @@ def imr_amplitude_dot(
         Amplitude coefficients for the mode.
     phase_coeffs_22 : PhaseCoeffs
         Phase coefficients for the 22 mode.
+    return_amplitude : bool, default False
+        Whether to return the amplitude as well.
 
     Returns
     -------
-    Array
-        Computed amplitude time derivative at the given times.
+    Array | Tuple[Array, Array]
+        Computed amplitude time derivative at the given times. If `return_amplitude` is True, the function returns the amplitude value as well.
     """
-    _,dA_dt = jax.jvp(lambda t: imr_amplitude(t, eta, amp_coeffs, phase_coeffs_22), (time,), (jnp.ones_like(time),))
+    A, dA_dt = jax.jvp(
+        lambda t: imr_amplitude(t, eta, amp_coeffs, phase_coeffs_22),
+        (time,),
+        (jnp.ones_like(time),),
+    )
+
+    if return_amplitude:
+        return A, dA_dt
     return dA_dt
+
 
 # =============================================================================
 # Helper functions
