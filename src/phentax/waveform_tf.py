@@ -1718,39 +1718,6 @@ class IMRPhenomTHM_TF:
                     A_dot_0[:,:,jnp.newaxis]/(2*jnp.pi*f_dot[:,:,jnp.newaxis]) * I_prime - # Contribution from amplitude variation (A_dot term)
                     A_dot_0[:,:,jnp.newaxis]*(f_0[:,:,jnp.newaxis]-frequencies)/(jnp.sqrt(2)*(f_dot[:,:,jnp.newaxis])**(3/2))* I # Contribution from amplitude variation (f_0 dot term)
                 )
-
-                # print('Relative importance: ')
-                # print('Basic Fresnel term vs both A_dot term:', 
-                #       jnp.abs(Amps[:,:,jnp.newaxis]/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * I) / jnp.abs(A_dot_0[:,:,jnp.newaxis]/(2*jnp.pi*f_dot[:,:,jnp.newaxis]) * I_prime - A_dot_0[:,:,jnp.newaxis]*(f_0[:,:,jnp.newaxis]-frequencies)/(jnp.sqrt(2)*(f_dot[:,:,jnp.newaxis])**(3/2))* I))
-                
-                # # Explicit loop over sources and modes for Fresnel sum
-                # waveform = jnp.zeros((num_sources, n_modes, 2*closest_f_bins), dtype=jnp.complex128)
-                # for i in range(num_sources):
-                #     for j in range(n_modes):
-                #         phase = Phases[i, j]
-                #         amp = Amps[i, j]
-                #         fdot = f_dot[i, j]
-                #         f0 = f_0[i, j]
-                #         adot = A_dot_0[i, j]
-                #         freq_arr = frequencies[i, j]
-                #         # Fresnel integrals for this (source, mode)
-                #         v_nm_end_ij = v_serial(fdot, t_0, t_1, freq_arr, f0)
-                #         v_nm_begin_ij = v_serial(fdot, t_0, t_0, freq_arr, f0)
-                #         S_vn_end_ij, C_vn_end_ij = jax.scipy.special.fresnel(v_nm_end_ij)
-                #         S_vn_begin_ij, C_vn_begin_ij = jax.scipy.special.fresnel(v_nm_begin_ij)
-                #         I_ij = C_vn_end_ij - C_vn_begin_ij + 1j * (S_vn_end_ij - S_vn_begin_ij)
-                #         delta_s_ij = jnp.sin(jnp.pi/2 * v_nm_end_ij**2) - jnp.sin(jnp.pi/2 * v_nm_begin_ij**2)
-                #         delta_c_ij = jnp.cos(jnp.pi/2 * v_nm_end_ij**2) - jnp.cos(jnp.pi/2 * v_nm_begin_ij**2)
-                #         I_prime_ij = delta_s_ij - 1j * delta_c_ij
-                #         exp_phase = jnp.exp(1j * phase)
-                #         exp_quad = jnp.exp(-1j * jnp.pi * ((f0 - freq_arr)**2) / fdot)
-                #         term1 = amp / jnp.sqrt(2 * fdot) * I_ij
-                #         term2 = adot / (2 * jnp.pi * fdot) * I_prime_ij
-                #         term3 = -adot * (f0 - freq_arr) / (jnp.sqrt(2) * (fdot**(3/2))) * I_ij
-                #         waveform_ij = exp_phase * exp_quad * (term1 + term2 + term3)
-                #         waveform = waveform.at[i, j, :].set(waveform_ij)
-
-                # Store each waveform in its own 'tf grid' for now.
                 waveform_storage = waveform_storage.at[time_index,:,:,:].set(waveform)
 
                 # Store the corresponding frequency indices for each waveform value, which will be used to place the values in the correct position in the final tf grid.
@@ -1861,13 +1828,379 @@ class IMRPhenomTHM_TF:
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
 
+    # @jax.jit(static_argnums=[0,16])
+    def get_tf_fresnel_waveform_vanilla_TF_midpoint(self,
+                                time_grid: Array,
+                                frequency_grid: Array,
+                                m1: float | Array,
+                                m2: float | Array,
+                                chi1z: float | Array,
+                                chi2z: float | Array,
+                                distance: float | Array,
+                                phi_ref: float | Array,
+                                f_ref: float | Array,
+                                f_min: float | Array,
+                                inclination: float | Array,
+                                psi: float | Array,
+                                delta_t: float = 15.0,
+                                t_min: float = jnp.nan,
+                                t_ref: float = jnp.nan,
+                                closest_f_bins: int = 10,
+                                time_of_projections : float | Array = 0.0,
+                            ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
+
+        """
+        Implementation of time-frequency Fresnel waveform generation.
+
+        Everything aligning at merger. 
+        """
+
+        num_sources = jnp.atleast_1d(m1).shape[0]
+
+        # print("Number of sources: ", num_sources)
+        # Ignore times for now 
+        wf_params, amplitude_coeffs_22, phase_coeffs_22 = (
+                    self.initial_processing_TF(
+                        m1,
+                        m2,
+                        chi1z,
+                        chi2z,
+                        distance,
+                        phi_ref,
+                        f_ref,
+                        f_min,
+                        inclination,
+                        psi,
+                        delta_t,
+                        t_min,
+                        t_ref,
+                    )
+                )
+            
+        # This is the minimum time for every waveform in the batch in mass units 
+        min_time_M_units = wf_params.Mt_min 
+        # print('min time M units:',min_time_M_units)
+
+        #Convert every single min time to physical units (seconds) to see what is the longest waveform in absolute (real) time
+        time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
+
+        # print('All time min physical (s):',time_min_physical_all)
+
+        # Pad to smallest min time (real units) to ensure all waveforms fit in the time grid
+        min_time_s_units = jnp.min(time_min_physical_all)
+        # print('Padded min time (real units):',min_time_s_units)
+
+        # Check the length of the longest signal is not longer than the grid: 
+        # assert jnp.abs(min_time_s_units) > jnp.abs(time_grid[-1]), "Time grid is not long enough to contain the longest waveform!"
+        # print('Time min physical (s):',min_time_s_units)
+
+        # print('Original time grid:',time_grid)
+
+        # shift time grid to be negative, limited by the length of the longest waveform. (Physical units, seconds)
+        time_grid += min_time_s_units
+        # print('Shifted time grid (should be negative):',time_grid)
+    
+
+        # Work out what OUR time grid corresponds to in mass units for each binary 
+        time_grids_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(time_grid, wf_params.total_mass)
+
+        new_mask = jnp.ones_like(time_grid, dtype=bool)
+
+
+        # print('Time grid in mass units:',time_grids_mass_units,time_grids_mass_units.shape)
+
+        # Compute amplitudes and phases for every binary over the time grid and mask    
+        # Note: new_mask is the same for all sources, so we use in_axes=None for it (which are in seconds intiially and mapped uniquely to mass units for each binary)
+        # amplitudes, phases = jax.vmap(self._compute_all_modes, in_axes = (0, None, 0, 0, 0))(
+        #     time_grids_mass_units,
+        #     new_mask,
+        #     wf_params,
+        #     amplitude_coeffs_22,
+        #     phase_coeffs_22,
+        # )  
+
+        t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])  # Midpoints between time grid edges, shape (n_times - 1,)
+        t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(t_grid_midpoints, wf_params.total_mass)
+        midpoint_mask = jnp.ones_like(t_grid_midpoints, dtype=bool)  
+        
+        # Compute amplitudes and phases at midpoints of each tranche for each binary
+        amplitudes, phases = jax.vmap(self._compute_all_modes, in_axes = (0, None, 0, 0, 0))(
+            t_grid_midpoints_mass_units,
+            midpoint_mask,
+            wf_params,
+            amplitude_coeffs_22,
+            phase_coeffs_22,
+        )
+
+        n_modes = amplitudes.shape[1]
+
+       
+       # Get higher order modes phase coeffs
+        phase_hm_coeffs,_ = jax.vmap(
+            lambda wp, pc22: jax.vmap(
+                lambda mode: self._compute_phase_coeffs_hm(mode, wp, pc22)
+            )(self.higher_modes)
+        )(wf_params, phase_coeffs_22)
+
+        # print('Phase HM coeffs:',phase_hm_coeffs)
+
+        # Combine 22 and HM phase coeffs 
+        overall_phase_coeffs = jax.tree_util.tree_map(
+            lambda p22, phm: jnp.concatenate([p22[:, None], phm], axis=1),
+            phase_coeffs_22,
+            phase_hm_coeffs,
+        )
+        # print('Phase overall coeffs:',overall_phase_coeffs)
+
+        # amplitudes shape: [num_sources, num_modes, num_times]
+        # amp_factor shape: [num_sources] -> need to reshape for broadcasting
+        amplitudes *= wf_params.amp_factor[:, None, None]
+
+        # # For each source find the time at which to begin the waveform. (Is this handled inside the waveform parameter computation? i have no idea)
+        # t_min_index = jnp.nonzero(jnp.abs(amplitudes[:,0,:]),axis=1)
+
+        # Back to sensible and positive time grid
+        time_grid -= min_time_s_units
+        t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])
+        
+        # Frequency grid spacing (assumed uniform)
+        dF = frequency_grid[1] - frequency_grid[0]
+
+        # Waveform storage container, will be combined into TF later
+        waveform_storage = jnp.zeros((time_grid.size,num_sources,n_modes,2*closest_f_bins), dtype=jnp.complex128)
+
+        # Storage for frequency indices at each time step (# 2*closest_f_bins because we are storing bins on either side of the closest frequency for each harmonic for each time)
+        frequency_indices_storage = jnp.zeros((time_grid.size,num_sources,n_modes,2*closest_f_bins), dtype=jnp.int32)
+
+        #tf grid 
+        # tf_grid = jnp.zeros((num_sources,time_grid.size, frequency_grid.size), dtype=jnp.complex128)
+
+        # In principle can also be vmapped over time steps here, however I think it would be completely unreadable and a nightmare to debug/maintain.. 
+        for time_index in range(time_grid.size - 1):  # -1 to avoid index out of bounds with t_1
+                
+                t_0 = time_grid[time_index]
+                t_1 = time_grid[time_index+1]
+
+                t_midpoint = t_grid_midpoints[time_index]
+
+                print(t_0,t_1,t_midpoint)
+
+                # Convert t_0 to mass units for each binary for each binary
+                # (TODO: can be taken out of the loop, can be an array operation as we know the time-grid apriori so can be vmapped across that )
+                # t_0_mass = jax.vmap(second_to_mass, in_axes=(None, 0))(t_0 + min_time_s_units, wf_params.total_mass) # nSources, 
+                t_midpoint_mass = jax.vmap(second_to_mass, in_axes=(None, 0))(t_midpoint + min_time_s_units, wf_params.total_mass) # nSources, 
+
+                Amps = amplitudes[:,:, time_index] # Source, #Mode , # Time  Evaluated at midpoint
+                Phases = phases[:,:, time_index]   # Source, #Mode , # Time  Evaluated at midpoint 
+                # overall_phase_coeffs contains phase coeffs for all modes at once for all binaries (Only positive modes remember)
+                # Using this compute f_0 and f_dot for each source and each mode at this time
+                # 
+                # Shapes:
+                #   t_0_mass: (num_sources,)
+                #   wf_params.eta: (num_sources,)
+                #   overall_phase_coeffs: dictionary like structure but each field has shape (num_sources, num_modes, ...)
+                #
+                # Nested vmap explanation:
+                # -------------------------
+                # We need to compute imr_omega for every (source, mode) combination.
+                # 
+                # OUTER vmap (over sources):
+                #   - Iterates over axis 0 of t_0_mass, eta, and overall_phase_coeffs
+                #   - For source i: t_0_mass[i] is scalar, eta[i] is scalar, 
+                #     overall_phase_coeffs[i] is a pytree with shape (num_modes, ...) per field
+                #
+                # INNER vmap (over modes for a single source):
+                #   - For a single source, iterates over axis 0 of phase_coeffs (the modes axis)
+                #   - Computes imr_omega(t, eta, p) for each mode's phase coeffs p
+                #   - t and eta are fixed scalars from the outer vmap
+                #
+                # Result: f_0 has shape (num_sources, num_modes) (same with f_dot)
+                
+                # pc is the phase coefficents for a single source, shape (num_modes, ...), p is the phase coeffs for a single mode, shape (...)
+                f_0 = jax.vmap(
+                    lambda t, eta, pc: jax.vmap(lambda p: imr_omega(t, eta, p))(pc)
+                )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)  # IN MASS UNITS
+
+                f_dot = jax.vmap(
+                    lambda t, eta, pc: jax.vmap(lambda p: imr_omega_dot(t, eta, p))(pc)
+                )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)  # IN MASS UNITS
+                # print('F dot (mass units) shape:', f_dot.shape)
+
+                # Convert f_0 and f_dot to Hz and Hz^2 respectively
+                f_0 = jax.vmap(mass_to_hz, in_axes=(0, 0))(f_0, wf_params.total_mass)
+                f_dot = jax.vmap(df_dt_to_Hz_squared, in_axes=(0, 0))(f_dot, wf_params.total_mass)
+
+
+                # print('F0 (Hz) shape:', f_0.shape) 
+                # print('F dot (Hz^2) shape:', f_dot.shape)
+
+                # NOTE: the potential for frequencies around f0 going out of bounds is dealt with later. 
+
+                # Compute closest frequency indexes in the grid for each source and mode
+                # Uniform grid → direct arithmetic instead of materializing an (nSrc, nMode, nFreq) tensor
+                closest_frequency_indexes = jnp.round((f_0 - frequency_grid[0]) / dF).astype(jnp.int32)
+                closest_frequency_indexes = jnp.clip(closest_frequency_indexes, 0, frequency_grid.size - 1)
+                closest_frequencies = frequency_grid[closest_frequency_indexes] 
+                # Closest frequency shape is (num_sources, num_modes) and closest frequency indexes is also (num_sources, num_modes). 
+                # Same shape as f_0 and f_dot
+
+                # print('Closest frequency indexes shape:', closest_frequency_indexes.shape,closest_frequency_indexes.flatten().shape)
+
+                # for every frequency in closest_frequencies, generate a frequency array around it +/- closest_f_bins by going in steps of dF
+                frequencies = jax.vmap(
+                    lambda center_freqs: jnp.arange(
+                        0,
+                        2*closest_f_bins,
+                    ) * dF + center_freqs - closest_f_bins*dF, # Starting from center_freqs - closest_f_bins*dF to center_freqs + closest_f_bins*dF
+                )(closest_frequencies.flatten()).reshape(num_sources,n_modes,2*closest_f_bins)  #
+                # shape of frequencies is (num_sources, num_modes, 2*closest_f_bins) 
+
+                # Holds indices for each frequency in frequencies, which will be used to place the waveform values in the correct position in the final tf grid.
+                frequency_indices = jax.vmap(
+                    lambda indices: jnp.arange(
+                        0,
+                        2*closest_f_bins,
+                    )+ indices - closest_f_bins, # Starting from indices - closest_f_bins to indices + closest_f_bins
+                )(closest_frequency_indexes.flatten()).reshape(num_sources,n_modes,2*closest_f_bins)
+
+                # print('Frequencies shape:', frequencies.shape)
+                # print('Frequencies:', frequencies)
+                # print('Frequency indices shape:', frequency_indices.shape)
+                # print('Frequency indices:', frequency_indices)
+                
+                # The newaxis here is accounting for the frequency dimension, 
+                #     remember we generated a single A, f, f_dot for each source and mode,
+                #      but now we have an array of frequencies for each source and mode, so we need to add a new axis to Amps,
+                #      Phases, f_0 and f_dot to allow for broadcasting when computing the waveform values for each frequency.
+                
+
+                h_prefactor = Amps[:,:,jnp.newaxis]*jnp.exp(1j*Phases[:,:,jnp.newaxis])/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * jnp.exp(-2*1j*jnp.pi*frequencies*(t_midpoint-t_0)) * jnp.exp(-1j*jnp.pi*((f_0[:,:,jnp.newaxis] - frequencies)**2)/f_dot[:,:,jnp.newaxis])
+
+                # Fresnel integral stuff (all )
+                v_nm_end = v(f_dot,t_midpoint,t_1,frequencies,f_0)
+                v_nm_begin = v(f_dot,t_midpoint,t_0,frequencies,f_0)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
+
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+                waveform = h_prefactor * I
+                
+                # Store each waveform in its own 'tf grid' for now. 
+                # NOTE: Final implementation will use something much closer to the direct likelihood/inner product computation. Maybe....
+                # NOTE: In its current form this is *NOT* the actual TF grid, the frequency axis has not yet been placed in the correct position,
+                #         we are just storing the waveforms for each time step and each mode in a temporary array here, 
+                waveform_storage = waveform_storage.at[time_index,:,:,:].set(waveform)
+
+                # Store the corresponding frequency indices for each waveform value, which will be used to place the values in the correct position in the final tf grid.
+                frequency_indices_storage = frequency_indices_storage.at[time_index,:,:,:].set(frequency_indices)
+
+        # Note in theory one can do the direct likelihood/inner product computation directly from waveform storage I think. 
+
+
+        # TEMPORARY/DEV
+        # Transpose to (num_sources, num_times, num_modes, 2*closest_f_bins) for vmapping (basically changing around order of axes)
+        waveform_storage_transposed = waveform_storage.transpose(1, 0, 2, 3)
+        frequency_indices_transposed = frequency_indices_storage.transpose(1, 0, 2, 3)
+
+        # Number of frequency bins in the full grid
+        n_freq = frequency_grid.size # TODO: can be precomputed before this function. 
+
+        # Generate spherical harmonics for all modes and sources at once.
+        y_lms = spin_weighted_spherical_harmonic_all_modes(
+                    jnp.atleast_1d(inclination)[:, None],
+                    jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+                    self.ells,
+                    self.mms,
+                ) #Shape (num_sources, num_modes,1)
+        
+        y_lmms = spin_weighted_spherical_harmonic_all_modes(
+            jnp.atleast_1d(inclination)[:, None],
+            jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+            self.negative_ls,
+            self.negative_mms, 
+            ) #Shape (num_sources, num_modes,1)
+        
+        K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
+        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
+        
+
+        # total_fresnel_waveforms_h_plus = jnp.einsum('ni,ijk->jk',K_plus_lms,tf_grid)
+        # total_fresnel_waveforms_h_cross = jnp.einsum('ni,ijk->jk',K_cross_lms,tf_grid)
+
+        # h_plus_rotated, h_cross_rotated = imr.rotate_by_polarization_angle(total_fresnel_waveforms_h_plus, total_fresnel_waveforms_h_cross, psi)
+
+
+        def place_waveform_at_time(waveform_modes, indices_modes,K_plus, K_cross):
+            """
+            Place waveforms from all modes into the frequency grid for a single time step.
+            
+            waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
+            indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
+            K_plus: (n_modes,) - complex coefficients for plus polarization
+            K_cross: (n_modes,) - complex coefficients for cross polarization
+            
+            Returns: (n_freq,) - summed waveform across modes at correct frequency positions
+            """
+            # Multiply K coefficients *before* flattening so each mode's scalar
+            # broadcasts across its 2*closest_f_bins frequency entries.
+            # K_plus/K_cross: (n_modes,), waveform_modes: (n_modes, 2*closest_f_bins) 
+            h_plus_modes = K_plus[:, None] * waveform_modes   # (n_modes, 2*closest_f_bins)
+            h_cross_modes = K_cross[:, None] * waveform_modes
+
+            # Now flatten across modes and frequency bins
+            flat_h_plus = h_plus_modes.flatten()
+            flat_h_cross = h_cross_modes.flatten()
+            flat_indices = indices_modes.flatten()
+
+            # Mask out-of-bounds indices: zero their contributions
+            valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
+            flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
+            flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
+            
+            # Clip indices to valid range so .at[].add() doesn't error with out-of-bounds indices.
+            # The zeroed values mean nothing is actually added for these entries.
+            flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
+
+            result_plus = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_plus)
+            result_cross = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_cross)
+
+            return result_plus, result_cross
+
+        def process_source(waveforms_per_source, indices_per_source,K_plus, K_cross):
+            """
+            Process all time steps for a single source.
+            
+            waveforms_per_source: (n_times, n_modes, 2*closest_f_bins), this is a version of the TF grid for one source (with the wrong frequency axis)
+            indices_per_source: (n_times, n_modes, 2*closest_f_bins)
+            K_plus: (n_modes,) - complex coefficients for plus polarization
+            K_cross: (n_modes,) - complex coefficients for cross polarization
+            
+            Returns: (n_times, n_freq) - TF map for this source
+            """
+            # This is vmapping across timesteps
+            return jax.vmap(place_waveform_at_time, in_axes = (0, 0, None, None) )(waveforms_per_source, indices_per_source,K_plus, K_cross)
+
+        # NOTE: this is a 2 nested vmap, its just done like this right now for readability and debugging. 
+        # Vmap over sources to get final tf_grid with shape (num_sources, num_times, num_freq)
+        tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
+            waveform_storage_transposed,
+            frequency_indices_transposed,
+            K_plus_lms,
+            K_cross_lms
+        ) # vmap over *SOURCES*
+
+        # Rotate by polarization angle psi for each source (applied to all modes in the same way)
+        tf_grid_plus, tf_grid_cross = jax.vmap(self.rotate_by_polarization_angle)(
+            tf_grid_plus, tf_grid_cross, wf_params.psi
+        )
+        
+        
+        return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
+
+
+
 @jax.jit
 def v(f_dot_0,t_0,t_1,f,f_0):
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*((t_1-t_0) + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
-    return fresnel_argument
-
-# Non-vectorized version for use inside explicit loops
-def v_serial(f_dot_0, t_0, t_1, f, f_0):
-    # All inputs are scalars or 1D arrays (f)
-    fresnel_argument = jnp.sqrt(2 * f_dot_0) * ((t_1 - t_0) + (f_0 - f) / f_dot_0)
     return fresnel_argument
