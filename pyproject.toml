@@ -22,6 +22,8 @@ dependencies = [
     "scipy>=1.16.3",
     "seaborn>=0.13.2",
     "lisaconstants>=2.0.0",
+    "nbstripout>=0.9.1",
+    "nbdime>=4.0.4",
 ]
 
 [tool.uv]
