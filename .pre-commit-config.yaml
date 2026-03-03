@@ -1,33 +1,33 @@
 # .pre-commit-config.yaml
 repos:
-  # - repo: https://github.com/srstevenson/nb-clean
-  #   rev: 4.0.1
-  #   hooks:
-  #     - id: nb-clean
-  #       name: clean notebooks
-  #       args: [--remove-empty-cells, --remove-all-notebook-metadata]
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+        name: strip notebook outputs and execution counts
+        exclude: ^docs/
   - repo: https://github.com/hadialqattan/pycln
-    rev: v2.5.0
+    rev: v2.6.0
     hooks:
       - id: pycln
         name: remove unused imports
   # isort - sorts imports
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 8.0.1
     hooks:
       - id: isort
         name: isort (import sorting)
 
   # black - code formatter
   - repo: https://github.com/psf/black
-    rev: 24.1.1
+    rev: 26.1.0
     hooks:
       - id: black
         name: black (code formatting)
 
   # Basic checks (highly recommended)
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace  # Remove trailing whitespace
       - id: end-of-file-fixer    # Ensure files end with newline
@@ -36,7 +36,7 @@ repos:
         args: ['--maxkb=10000']  # Max 10MB
       - id: check-merge-conflict  # Detect merge conflict markers
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.15
+    rev: 0.10.7
     hooks:
       - id: uv-lock
         name: uv-lock (update vulnerability lockfile)
