@@ -279,7 +279,6 @@ def generate_adaptive_grid(
     tmins = jnp.atleast_1d(tmins)
     tmaxs = jnp.atleast_1d(tmaxs)
     Mdelta_ts = jnp.atleast_1d(Mdelta_ts)
-
     return jax.vmap(partial(_generate_adaptive_grid, max_steps=max_steps))(
         etas, tmins, tmaxs, Mdelta_ts
     )
