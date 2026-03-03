@@ -798,7 +798,7 @@ class IMRPhenomTHM:
         amplitudes = jnp.abs(strain_components)
         phases = jnp.unwrap(
             jnp.angle(strain_components)
-        )  # todo check the sign convention here
+        )
 
         return times, mask, amplitudes, phases
 
