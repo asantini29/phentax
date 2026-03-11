@@ -15,6 +15,22 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+def leading_order_factor(eta: float | Array) -> float | Array:
+    """
+    Compute the leading-order (positive) factor C in the adaptive time step formula.
+    
+    Parameters
+    ----------
+    eta : float | Array
+        Symmetric mass ratio.
+
+    Returns
+    -------
+    float | Array
+        Leading-order factor C such that :math:`\\Delta t = C \cdot |t|^{3/8}` in the inspiral.
+    """
+    SCALE_FACTOR = 12.0  # This is a tunable parameter that controls the overall density of the grid.
+    return (2.0 * jnp.pi * 4.0 / SCALE_FACTOR) * jnp.power(eta / 5.0, 3.0 / 8.0)
 
 def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array:
     """
@@ -33,8 +49,8 @@ def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array
         order GW frequency at time t.
     """
 
-    omega_lo = 0.25 * jnp.power(-eta * t * 0.2, -0.375)
-    return 1.0 / (omega_lo / (2.0 * jnp.pi)) / 12.0
+    C = leading_order_factor(eta)
+    return C * jnp.power(jnp.abs(t), 3.0 / 8.0)
 
 
 def estimate_adaptive_steps(
@@ -72,7 +88,7 @@ def estimate_adaptive_steps(
     tmin = jnp.atleast_1d(jnp.asarray(tmin, dtype=jnp.float64))
     tmax = jnp.atleast_1d(jnp.asarray(tmax, dtype=jnp.float64))
 
-    C = (2.0 * jnp.pi / 3.0) * jnp.power(eta / 5.0, 3.0 / 8.0)
+    C = leading_order_factor(eta)
     C_post = jnp.maximum(1.0, C)
 
     # Post-merger region: tmax → 0 with step C_post (+1 for the t=0 node)
@@ -184,8 +200,7 @@ def _generate_adaptive_grid(
           False means it is a padding value (tmin).
     """
     # Inspiral step-size constant: dt = C * |t|^{3/8}, clamped to C for |t| < 1
-    C = (2.0 * jnp.pi / 3.0) * jnp.power(eta / 5.0, 3.0 / 8.0)
-
+    C = leading_order_factor(eta)
     # Post-merger step: at least as large as the user's time resolution so we
     # never over-sample the ringdown compared to the uniform grid.
     C_post = jnp.maximum(C, Mdelta_t)
