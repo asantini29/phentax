@@ -141,12 +141,9 @@ class IMRPhenomTHM:
         else:
             self.T = T
 
-        # Pre-compute worst-case adaptive grid size so that max_steps is
-        # a class constant and never causes JIT recompilation.
-        if self.coarse_grain:
-            self._max_adaptive_steps: int | None = None  # will be set on first call
-        else:
-            self._max_adaptive_steps = None
+        # max_adaptive_steps will be lazily set on first call in
+        # initial_processing based on (T, delta_t).
+        self.max_adaptive_steps = None
 
     def __repr__(self):
         return (
@@ -161,6 +158,19 @@ class IMRPhenomTHM:
                 self.T,
             )
         )
+
+    @property
+    def max_adaptive_steps(self) -> Optional[int]:
+        return self._max_adaptive_steps
+
+    @max_adaptive_steps.setter
+    def max_adaptive_steps(self, value: Optional[int]= None):
+        if value is not None:
+            logger.debug("Setting max_adaptive_steps to %d", value)
+            self._max_adaptive_steps = value
+        else:
+            logger.debug("max_adaptive_steps will be set on first call based on T.")
+            self._max_adaptive_steps = None
 
     @property
     def num_modes(self) -> int:
@@ -1216,7 +1226,7 @@ class IMRPhenomTHM:
         if self.coarse_grain:
             # Use the pre-computed worst-case max_steps so the JIT-compiled
             # grid generator is never recompiled due to parameter changes.
-            if self._max_adaptive_steps is None:
+            if self.max_adaptive_steps is None:
                 raise RuntimeError(
                     "Adaptive grid size not initialized. "
                     "This should not happen — please report a bug."
@@ -1227,7 +1237,7 @@ class IMRPhenomTHM:
                 wf_params.Mt_min,
                 wf_params.Mt_end,
                 wf_params.Mdelta_t,
-                max_steps=self._max_adaptive_steps,
+                max_steps=self.max_adaptive_steps,
             )
 
         else:
@@ -1341,17 +1351,49 @@ class IMRPhenomTHM:
         # Lazily initialise the adaptive grid size on first call so that
         # (T, delta_t) are known.  If T or delta_t grow in a later call
         # we update, but only when the new estimate falls into a larger
-        # 5000-bucket — so recompilation is rare and bounded.
-        if self.coarse_grain:
-            new_max = estimate_adaptive_steps_from_T(T, delta_t)
-            if self._max_adaptive_steps is None or new_max > self._max_adaptive_steps:
-                self._max_adaptive_steps = new_max
-                logger.debug(
-                    "Adaptive grid max_steps set to %d (T=%.1f, delta_t=%.1f)",
-                    self._max_adaptive_steps,
-                    T,
-                    delta_t,
+        # BUCKET_SIZE-bucket — so recompilation is rare and bounded.
+        # if self.coarse_grain:
+        # compute this even without coarse graining to allow users to extract the adaptive grid size for their own use.
+        new_max = estimate_adaptive_steps_from_T(T, delta_t)
+        if self.max_adaptive_steps is None or new_max > self.max_adaptive_steps:
+            self.max_adaptive_steps = new_max
+            logger.debug(
+                "Adaptive grid max_steps set to %d (T=%.1f, delta_t=%.1f)",
+                self.max_adaptive_steps,
+                T,
+                delta_t,
                 )
         times, times_mask = self.get_time_grids(wf_params, num_steps)
 
+        # store the parameters to access the coarse-grained time array if needed 
+        self.wf_params = wf_params
+
         return wf_params, times, times_mask, amplitude_coeffs_22, phase_coeffs_22
+
+    def get_coarse_grained_time_array(self) -> tuple[Array, Array]:
+        """
+        Get the coarse-grained time array in seconds. This is useful for users who want to use the same time array for other computations.
+
+        Returns
+        -------
+        times_sec : Array
+            Coarse-grained time array in seconds.
+        mask : Array
+            Boolean mask indicating valid time points.
+        """
+        if self.wf_params is None:
+            raise RuntimeError(
+                "Waveform parameters not initialized. Please call compute_amp_phase or compute_polarizations first."
+            )
+
+        times_intrinsic, mask = generate_adaptive_grid(
+            self.wf_params.eta,
+            self.wf_params.Mt_min,
+            self.wf_params.Mt_end,
+            self.wf_params.Mdelta_t,
+            max_steps=self.max_adaptive_steps,
+        )
+
+        times_sec = mass_to_second(times_intrinsic, self.wf_params.total_mass)
+
+        return times_sec, mask

@@ -12,8 +12,13 @@ from functools import partial
 from typing import Callable
 
 import jax
+jax.config.update("jax_enable_x64", True)  # Use double precision for time calculations
 import jax.numpy as jnp
 from jaxtyping import Array
+
+SCALE_FACTOR = 12.0  # This is a tunable parameter that controls the overall density of the grid.
+BUCKET_SIZE = 2000  # Number of steps per bucket for JIT cache friendliness.  Must be >= 1.
+
 
 def leading_order_factor(eta: float | Array) -> float | Array:
     """
@@ -29,7 +34,6 @@ def leading_order_factor(eta: float | Array) -> float | Array:
     float | Array
         Leading-order factor C such that :math:`\\Delta t = C \cdot |t|^{3/8}` in the inspiral.
     """
-    SCALE_FACTOR = 12.0  # This is a tunable parameter that controls the overall density of the grid.
     return (2.0 * jnp.pi * 4.0 / SCALE_FACTOR) * jnp.power(eta / 5.0, 3.0 / 8.0)
 
 def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array:
@@ -61,7 +65,7 @@ def estimate_adaptive_steps(
 
     Uses the analytical solution of the leading-order ODE to predict the
     total number of grid points, then returns a value rounded up to the
-    nearest 5000 for JIT cache friendliness.
+    nearest BUCKET_SIZE for JIT cache friendliness.
 
     The estimate accounts for the three-region grid structure:
 
@@ -82,7 +86,7 @@ def estimate_adaptive_steps(
     -------
     int
         Estimated number of required steps (with safety margin), rounded
-        up to the nearest 5000.
+        up to the nearest BUCKET_SIZE.
     """
     eta = jnp.atleast_1d(jnp.asarray(eta, dtype=jnp.float64))
     tmin = jnp.atleast_1d(jnp.asarray(tmin, dtype=jnp.float64))
@@ -109,10 +113,10 @@ def estimate_adaptive_steps(
         0.0,
     )
 
-    # Take max across the batch, add safety margin, round up to nearest 5000
+    # Take max across the batch, add safety margin, round up to nearest BUCKET_SIZE
     N_total = int(jnp.ceil(jnp.max(N_post + N_fine + N_adaptive) * 1.2)) + 200
-    N_total = int(jnp.ceil(N_total / 5000.0) * 5000)
-    return max(N_total, 5000)  # at least 5000
+    N_total = int(jnp.ceil(N_total / BUCKET_SIZE) * BUCKET_SIZE)
+    return max(N_total, BUCKET_SIZE)  # at least BUCKET_SIZE
 
 
 def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
@@ -135,7 +139,7 @@ def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
     -------
     int
         Estimated number of required steps, rounded up to the nearest
-        5000 for JIT-cache friendliness.
+        BUCKET_SIZE for JIT-cache friendliness.
     """
     # Worst-case: equal mass eta=0.25 gives the densest adaptive grid.
     # tmin ~ -T/delta_t (rough conversion to mass-scaled time), tmax ~ 0
