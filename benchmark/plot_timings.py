@@ -1,4 +1,4 @@
-device = ""
+device = "3"
 if len(device) == 0:
     platform = "cpu"
     target_directory = "cpu"
@@ -19,21 +19,28 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import pysco
 from lisaconstants import ASTRONOMICAL_YEAR
 from tqdm import tqdm
 
 from phentax.waveform import IMRPhenomTHM
 
-prd_style = pysco.plots.journals.get_style("paper", journal="prd", cols="onecol")
-plt.style.use(prd_style)
+try:
+    import pysco
+    prd_style = pysco.plots.journals.get_style("paper", journal="prd", cols="onecol")
+    plt.style.use(prd_style)
+    cmap = pysco.plots.get_cmap("seq_r")
+    colors = pysco.plots.get_colorslist('cat')
+    # set the color cycle to the colors list
+    plt.rcParams['axes.prop_cycle'] = plt.cycler(color=colors)
 
-cmap = pysco.plots.get_cmap("seq")
+except (ImportError, ModuleNotFoundError):
+    print("pysco not found, using default matplotlib style and colormap")
+    cmap = plt.get_cmap("cividis")
 
 # ---------------
 tlowfit = True  # use a fit to set the starting time of the root finder used in t(f)
 tol = 1e-12  # root finding tolerance
-Tobs = 3 * ASTRONOMICAL_YEAR / 12
+Tobs = 2 * ASTRONOMICAL_YEAR / 12
 dt = 10.0
 # ---------------
 
@@ -50,13 +57,12 @@ f_ref = f_min
 Mt_min, Mt_max = 5e4, 5e7
 qmin, qmax = 0.1, 1.0
 
-num_per_axis = 2
+num_per_axis = 20
 Mt_values = jnp.logspace(jnp.log10(Mt_min), jnp.log10(Mt_max), num_per_axis)
 q_values = jnp.linspace(qmin, qmax, num_per_axis)
-N_AVG = 1  # number of times to repeat each computation for averaging
+N_AVG = 50  # number of times to repeat each computation for averaging
 
-batch_sizes = [1, 10, 100, 1000]
-
+batch_sizes = [1, 10, 50, 100, 200]
 
 def mt_q_to_m1_m2(mt, q):
     """
@@ -95,21 +101,40 @@ def fill_batch_arrays(
         psi_batch,
     )
 
-
 def plot_Mq_times(Mt_values, q_values, times_list):
     Mt_grid, q_grid = np.meshgrid(Mt_values, q_values, indexing="ij")
     times_array = np.array(times_list).reshape(len(Mt_values), len(q_values))
-
+    # limit the time to 3 decimal places for better color scaling
+    # times_array = times_array / 1e3 # convert to milliseconds
     plt.figure()
     cp = plt.contourf(Mt_grid, q_grid, times_array, levels=20, cmap=cmap)
-    plt.colorbar(cp)
+    # format the time values in the colorbar to be in milliseconds with 2 decimal places
+    cbar = plt.colorbar(cp)
+    cbar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x*1e3:.2f}"))
+    cbar.set_label("Average wall time (ms)", rotation=90, labelpad=12)
     plt.xscale("log")
-    plt.xlabel("Total Mass (Mt)")
-    plt.ylabel("Mass Ratio (q)")
-    plt.title("Computation Time for IMRPhenomTHM")
-    plt.savefig(f"{target_directory}/timings_Mt_q.png", dpi=300)
+    plt.xlabel(r"Total Mass ($M_{\rm tot}$)")
+    plt.ylabel(r"Mass Ratio ($q$)")
+    plt.savefig(f"{target_directory}/timings_Mt_q.png")
     # plt.show()
 
+def plot_batch_times(batch_sizes, batch_times, warmup_batch_times):
+    plt.figure()
+    plt.plot(batch_sizes, batch_times, marker=".", label="Batch Time")
+    plt.plot(batch_sizes, warmup_batch_times, marker="x", label="Warmup Time")
+    plt.plot(batch_sizes, np.array(batch_times) / np.array(batch_sizes), marker=".", label="Average time per sample")
+    plt.plot(batch_sizes, batch_times[0] / batch_sizes[0] * np.array(batch_sizes), c='k', linestyle="--", label="Linear Scaling Reference")
+
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel(r"Batch Size ($N_{\rm batch}$)")
+    plt.ylabel(r"Time (seconds)")
+    # plt.title("Average wall time (seconds) vs Batch Size")
+    # place the legend above the plot without overlapping the data points
+    plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.25), ncol=2, fancybox=True, numpoints=1)
+    #plt.grid(True)
+    plt.savefig(f"{target_directory}/timings_batch_size.png", dpi=300)
+    # plt.show()
 
 if __name__ == "__main__":
 
@@ -261,3 +286,6 @@ if __name__ == "__main__":
         print(
             f"Batch size: {batch_size}, average time: {elapsed_time / N_AVG:.2f} seconds"
         )
+
+    plot_batch_times(batch_sizes, batch_times, warmup_batch_times)
+    print("Done!")
