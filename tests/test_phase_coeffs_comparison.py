@@ -18,9 +18,31 @@ jax.config.update("jax_enable_x64", True)
 from phenomxpy.phenomt.internals import pPhase, pWF, pWFHM
 
 # Import phentax
-from phentax import phase
+from phentax.core.internals import compute_waveform_params
+from phentax.core.phase import compute_phase_coeffs_22
 
 total_mass = 100
+
+
+def _make_wf_params(eta, s1z, s2z, total_mass=100.0, f_min=20.0):
+    """Create WaveformParams from eta and spins for comparison tests."""
+    import numpy as np
+
+    delta = np.sqrt(1.0 - 4.0 * eta)
+    m1_solar = 0.5 * (1.0 + delta) * total_mass
+    m2_solar = 0.5 * (1.0 - delta) * total_mass
+    return compute_waveform_params(
+        m1=m1_solar,
+        m2=m2_solar,
+        s1z=s1z,
+        s2z=s2z,
+        distance=100.0,
+        inclination=0.0,
+        phi_ref=0.0,
+        psi=0.0,
+        f_ref=f_min,
+        f_min=f_min,
+    )
 
 
 def assert_close(actual, expected, rtol=1e-10, atol=1e-12, name="value"):
@@ -58,7 +80,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.omega1PN, pphase.omega1PN, name="omega1PN")
         assert_close(coeffs.omega1halfPN, pphase.omega1halfPN, name="omega1halfPN")
@@ -84,7 +107,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.omegaInspC1, pphase.omegaInspC1, name="omegaInspC1")
         assert_close(coeffs.omegaInspC2, pphase.omegaInspC2, name="omegaInspC2")
@@ -109,7 +133,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.omegaRING, pphase.omegaRING, name="omegaRING")
         assert_close(coeffs.alpha1RD, pphase.alpha1RD, name="alpha1RD")
@@ -134,7 +159,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.omegaMergerC1, pphase.omegaMergerC1, name="omegaMergerC1")
         assert_close(coeffs.omegaMergerC2, pphase.omegaMergerC2, name="omegaMergerC2")
@@ -155,7 +181,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.inspiral_cut, pphase.inspiral_cut, name="inspiral_cut")
         assert_close(coeffs.tt0, pphase.tt0, name="tt0")
@@ -176,7 +203,8 @@ class TestPhaseCoeffs22:
         )
         pphase = pPhase(pwf)
 
-        coeffs = phase.compute_phase_coeffs_22(eta, s1z, s2z)
+        wf_params = _make_wf_params(eta, s1z, s2z)
+        _, coeffs = compute_phase_coeffs_22(wf_params)
 
         assert_close(coeffs.phOffInsp, pphase.phOffInsp, name="phOffInsp")
         assert_close(coeffs.phOffMerger, pphase.phOffMerger, name="phOffMerger")
