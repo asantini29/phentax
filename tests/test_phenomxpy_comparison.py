@@ -20,8 +20,8 @@ from phenomxpy.phenomt import fits as pxpy_fits
 from phenomxpy.phenomt import internals as pxpy_internals
 
 # Import phentax (JAX implementation)
-from phentax import fits as ptax_fits
-from phentax import utils as ptax_utils
+from phentax.core import fits as ptax_fits
+from phentax.utils import utility as ptax_utils
 
 # =============================================================================
 # Test parameters - various mass ratios and spins
