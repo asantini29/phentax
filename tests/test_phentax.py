@@ -30,22 +30,22 @@ class TestImports:
 
     def test_import_config_constants(self):
         """Test constants module import."""
-        from phentax import config, constants
+        from phentax.utils import config, constants
 
         assert hasattr(constants, "MTSUN_SI")
         assert hasattr(config, "configure_jax")
 
     def test_import_utils(self):
         """Test utils module import."""
-        from phentax import utils
+        from phentax.utils import utility, ylm
 
-        assert hasattr(utils, "chi_eff")
-        assert hasattr(utils, "m1ofeta")
-        assert hasattr(utils, "spin_weighted_spherical_harmonic")
+        assert hasattr(utility, "chi_eff")
+        assert hasattr(utility, "m1ofeta")
+        assert hasattr(ylm, "spin_weighted_spherical_harmonic")
 
     def test_import_fits(self):
         """Test fits module import."""
-        from phentax import fits
+        from phentax.core import fits
 
         assert hasattr(fits, "final_mass_2017")
         assert hasattr(fits, "final_spin_2017")
@@ -60,17 +60,16 @@ class TestImports:
 
     def test_import_internals(self):
         """Test internals module import."""
-        from phentax import internals
+        from phentax.core import internals
 
         assert hasattr(internals, "WaveformParams")
-        assert hasattr(internals, "compute_derived_params")
+        assert hasattr(internals, "compute_waveform_params")
 
     def test_import_waveform(self):
         """Test waveform module import."""
         from phentax import waveform
 
-        assert hasattr(waveform, "make_params")
-        assert hasattr(waveform, "compute_polarizations")
+        assert hasattr(waveform, "IMRPhenomTHM")
 
 
 class TestUtils:
@@ -78,7 +77,7 @@ class TestUtils:
 
     def test_m1ofeta(self):
         """Test m1ofeta function."""
-        from phentax.utils import m1ofeta
+        from phentax.utils.utility import m1ofeta
 
         # Equal mass: eta = 0.25, m1 = m2 = 0.5
         eta = 0.25
@@ -92,7 +91,7 @@ class TestUtils:
 
     def test_m2ofeta(self):
         """Test m2ofeta function."""
-        from phentax.utils import m2ofeta
+        from phentax.utils.utility import m2ofeta
 
         eta = 0.25
         m2 = m2ofeta(eta)
@@ -100,7 +99,7 @@ class TestUtils:
 
     def test_chi_eff(self):
         """Test chi_eff function."""
-        from phentax.utils import chi_eff
+        from phentax.utils.utility import chi_eff
 
         # Equal mass, aligned spins
         eta = 0.25
@@ -117,7 +116,7 @@ class TestUtils:
 
     def test_sTotR(self):
         """Test sTotR function."""
-        from phentax.utils import sTotR
+        from phentax.utils.utility import sTotR
 
         # For equal mass (eta=0.25, m1=m2=0.5), and equal spins (s1z=s2z=0.5):
         # sTotR = (m1^2*s1z + m2^2*s2z) / (m1^2+m2^2) = 0.25 / 0.5 = 0.5
@@ -129,14 +128,14 @@ class TestUtils:
 
     def test_spin_weighted_spherical_harmonic(self):
         """Test SWSH function."""
-        from phentax.utils import spin_weighted_spherical_harmonic
+        from phentax.utils.ylm import spin_weighted_spherical_harmonic
 
         # Y^{-2}_{22} at theta=0 (face-on) should be maximal
-        Y22 = spin_weighted_spherical_harmonic(0.0, 0.0, -2, 2, 2)
+        Y22 = spin_weighted_spherical_harmonic(0.0, 0.0, 2, 2)
         assert jnp.isfinite(Y22)
 
         # Y^{-2}_{22} at theta=pi should be 0 (face-off)
-        Y22_off = spin_weighted_spherical_harmonic(jnp.pi, 0.0, -2, 2, 2)
+        Y22_off = spin_weighted_spherical_harmonic(jnp.pi, 0.0, 2, 2)
         assert jnp.isclose(jnp.abs(Y22_off), 0.0, atol=1e-10)
 
 
@@ -145,7 +144,7 @@ class TestFits:
 
     def test_final_mass(self):
         """Test final mass fits."""
-        from phentax.fits import final_mass_2017
+        from phentax.core.fits import final_mass_2017
 
         # Equal mass, non-spinning
         eta = 0.25
@@ -156,7 +155,7 @@ class TestFits:
 
     def test_final_spin(self):
         """Test final spin fits."""
-        from phentax.fits import final_spin_2017
+        from phentax.core.fits import final_spin_2017
 
         # Equal mass, non-spinning
         eta = 0.25
@@ -170,7 +169,7 @@ class TestFits:
 
     def test_fring_22(self):
         """Test ringdown frequency fit."""
-        from phentax.fits import fring_22
+        from phentax.core.fits import fring_22
 
         # Non-spinning remnant
         f_ring = fring_22(0.0)
@@ -182,7 +181,7 @@ class TestFits:
 
     def test_fdamp_22(self):
         """Test damping frequency fit."""
-        from phentax.fits import fdamp_22
+        from phentax.core.fits import fdamp_22
 
         f_damp = fdamp_22(0.0)
         assert f_damp > 0
@@ -195,10 +194,10 @@ class TestInternals:
     """Test internal data structures and computation."""
 
     def test_waveform_params_creation(self):
-        """Test WaveformParams NamedTuple."""
-        from phentax.internals import WaveformParams
+        """Test WaveformParams creation via compute_waveform_params."""
+        from phentax.core.internals import compute_waveform_params
 
-        params = WaveformParams(
+        wf_params = compute_waveform_params(
             m1=30.0,
             m2=30.0,
             s1z=0.0,
@@ -206,18 +205,20 @@ class TestInternals:
             distance=100.0,
             inclination=0.0,
             phi_ref=0.0,
-            f_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
         )
 
-        assert params.m1 == 30.0
-        assert params.m2 == 30.0
-        assert params.distance == 100.0
+        assert jnp.isclose(wf_params.total_mass, 60.0, rtol=1e-10)
+        assert jnp.isclose(wf_params.eta, 0.25, rtol=1e-10)
+        assert wf_params.distance == 100.0
 
-    def test_compute_derived_params(self):
+    def test_compute_derived_quantities(self):
         """Test derived parameter computation."""
-        from phentax.internals import WaveformParams, compute_derived_params
+        from phentax.core.internals import compute_waveform_params
 
-        params = WaveformParams(
+        wf_params = compute_waveform_params(
             m1=30.0,
             m2=30.0,
             s1z=0.0,
@@ -225,27 +226,23 @@ class TestInternals:
             distance=100.0,
             inclination=0.0,
             phi_ref=0.0,
-            f_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
         )
 
-        derived = compute_derived_params(params)
-
-        assert jnp.isclose(derived.M_total, 60.0, rtol=1e-10)
-        assert jnp.isclose(derived.eta, 0.25, rtol=1e-10)
-        assert jnp.isclose(derived.delta, 0.0, rtol=1e-10)
-        assert jnp.isclose(derived.chi_eff, 0.0, rtol=1e-10)
-        assert derived.Mf < derived.M_total  # Some mass radiated
-        assert 0 < derived.af < 1  # Physical spin
+        assert jnp.isclose(wf_params.eta, 0.25, rtol=1e-10)
+        assert jnp.isclose(wf_params.delta, 0.0, atol=1e-10)
+        assert jnp.isclose(wf_params.chi_eff, 0.0, rtol=1e-10)
+        assert wf_params.Mf < 1.0  # Some mass radiated (dimensionless)
+        assert 0 < wf_params.af < 1  # Physical spin
 
     def test_compute_phase_coeffs(self):
         """Test phase coefficient computation."""
-        from phentax.internals import (
-            WaveformParams,
-            compute_derived_params,
-            compute_phase_coeffs_22,
-        )
+        from phentax.core.internals import compute_waveform_params
+        from phentax.core.phase import compute_phase_coeffs_22
 
-        params = WaveformParams(
+        wf_params = compute_waveform_params(
             m1=30.0,
             m2=30.0,
             s1z=0.0,
@@ -253,105 +250,133 @@ class TestInternals:
             distance=100.0,
             inclination=0.0,
             phi_ref=0.0,
-            f_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
         )
 
-        derived = compute_derived_params(params)
-        phase_coeffs = compute_phase_coeffs_22(derived)
+        wf_params, phase_coeffs = compute_phase_coeffs_22(wf_params)
 
-        assert phase_coeffs.omega_ring > 0
-        assert phase_coeffs.gamma > 0
-        assert phase_coeffs.omega_peak > 0
+        assert phase_coeffs.omegaRING > 0
+        assert phase_coeffs.alpha1RD > 0
+        assert phase_coeffs.omegaPeak > 0
 
 
 class TestWaveform:
     """Test waveform generation."""
 
-    def test_make_params(self):
-        """Test parameter creation helper."""
-        from phentax import make_params
+    def test_model_creation(self):
+        """Test IMRPhenomTHM model creation."""
+        from phentax.waveform import IMRPhenomTHM
 
-        params = make_params(m1=30.0, m2=30.0)
-
-        assert params.m1 == 30.0
-        assert params.m2 == 30.0
-        assert params.s1z == 0.0  # Default
-        assert params.distance == 100.0  # Default
+        model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
+        assert model.num_modes == 1
 
     def test_compute_polarizations_runs(self):
         """Test that compute_polarizations runs without error."""
-        from phentax import compute_polarizations, make_params
+        from phentax.waveform import IMRPhenomTHM
 
-        params = make_params(m1=30.0, m2=30.0, distance=100.0)
+        model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
 
-        # Short time array for fast test
-        times = jnp.linspace(-0.1, 0.01, 1000)
-
-        hp, hc = compute_polarizations(times, params)
+        times, mask, hp, hc = model.compute_polarizations(
+            m1=30.0,
+            m2=30.0,
+            chi1z=0.0,
+            chi2z=0.0,
+            distance=100.0,
+            phi_ref=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+            inclination=0.0,
+            psi=0.0,
+        )
 
         assert hp.shape == times.shape
         assert hc.shape == times.shape
-        assert jnp.all(jnp.isfinite(hp))
-        assert jnp.all(jnp.isfinite(hc))
+        # Check finite values where mask is valid
+        assert jnp.all(jnp.isfinite(hp[mask]))
+        assert jnp.all(jnp.isfinite(hc[mask]))
 
-    def test_compute_polarizations_is_jittable(self):
-        """Test that compute_polarizations can be JIT compiled."""
-        from phentax import compute_polarizations, make_params
+    def test_compute_polarizations_deterministic(self):
+        """Test that compute_polarizations produces consistent results."""
+        from phentax.waveform import IMRPhenomTHM
 
-        params = make_params(m1=30.0, m2=30.0)
-        times = jnp.linspace(-0.1, 0.01, 1000)
+        model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
 
-        # JIT compile
-        jit_compute = jax.jit(lambda t: compute_polarizations(t, params))
+        kwargs = dict(
+            m1=30.0,
+            m2=30.0,
+            chi1z=0.0,
+            chi2z=0.0,
+            distance=100.0,
+            phi_ref=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+            inclination=0.0,
+            psi=0.0,
+        )
 
-        hp, hc = jit_compute(times)
+        times1, mask1, hp1, hc1 = model.compute_polarizations(**kwargs)
+        times2, mask2, hp2, hc2 = model.compute_polarizations(**kwargs)
 
-        assert hp.shape == times.shape
-        assert jnp.all(jnp.isfinite(hp))
+        assert jnp.allclose(hp1[mask1], hp2[mask2])
+        assert jnp.allclose(hc1[mask1], hc2[mask2])
 
-    def test_compute_hlm_22(self):
-        """Test 22 mode computation."""
-        from phentax import make_params
-        from phentax.waveform import compute_hlm_22
+    def test_compute_hlms(self):
+        """Test hlm mode computation."""
+        from phentax.waveform import IMRPhenomTHM
 
-        params = make_params(m1=30.0, m2=30.0)
-        times = jnp.linspace(-0.1, 0.01, 1000)
+        model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
 
-        h_real, h_imag = compute_hlm_22(times, params)
+        times, mask, hlms = model.compute_hlms(
+            m1=30.0,
+            m2=30.0,
+            chi1z=0.0,
+            chi2z=0.0,
+            distance=100.0,
+            phi_ref=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+            inclination=0.0,
+            psi=0.0,
+        )
 
-        assert h_real.shape == times.shape
-        assert h_imag.shape == times.shape
-        assert jnp.all(jnp.isfinite(h_real))
-        assert jnp.all(jnp.isfinite(h_imag))
+        assert jnp.all(jnp.isfinite(hlms[0][mask]))
 
 
 class TestJAXFeatures:
     """Test JAX-specific features."""
 
     def test_vmap_over_params(self):
-        """Test that waveform can be vmapped over parameters."""
-        from phentax import make_params
-        from phentax.internals import compute_derived_params
+        """Test that waveform params can be batched over parameters."""
+        from phentax.core.internals import compute_waveform_params
 
-        # Create batch of parameters
+        # compute_waveform_params handles batching internally when given arrays
         m1_batch = jnp.array([20.0, 30.0, 40.0])
         m2_batch = jnp.array([20.0, 30.0, 40.0])
+        zeros = jnp.zeros(3)
+        dists = jnp.full(3, 100.0)
+        frefs = jnp.full(3, 20.0)
 
-        def compute_eta(m1, m2):
-            params = make_params(m1=m1, m2=m2)
-            derived = compute_derived_params(params)
-            return derived.eta
+        wf_params = compute_waveform_params(
+            m1=m1_batch,
+            m2=m2_batch,
+            s1z=zeros,
+            s2z=zeros,
+            distance=dists,
+            inclination=zeros,
+            phi_ref=zeros,
+            psi=zeros,
+            f_ref=frefs,
+            f_min=frefs,
+        )
 
-        # vmap over masses
-        compute_eta_batch = jax.vmap(compute_eta)
-        etas = compute_eta_batch(m1_batch, m2_batch)
-
-        assert etas.shape == (3,)
-        assert jnp.allclose(etas, 0.25, rtol=1e-10)  # All equal mass
+        assert wf_params.eta.shape == (3,)
+        assert jnp.allclose(wf_params.eta, 0.25, rtol=1e-10)  # All equal mass
 
     def test_grad_of_fits(self):
         """Test that fits are differentiable."""
-        from phentax.fits import final_spin_2017
+        from phentax.core.fits import final_spin_2017
 
         def f(eta):
             return final_spin_2017(eta, 0.0, 0.0)
@@ -366,7 +391,7 @@ class TestJAXFeatures:
 
     def test_jit_compilation_caching(self):
         """Test that JIT compilation works and caches."""
-        from phentax.fits import final_mass_2017
+        from phentax.core.fits import final_mass_2017
 
         jit_fm = jax.jit(final_mass_2017)
 
@@ -383,41 +408,61 @@ class TestPhysicalConsistency:
     """Test physical consistency of waveforms."""
 
     def test_amplitude_peaks_near_merger(self):
-        """Test that amplitude peaks near t=0 (merger)."""
-        from phentax import compute_polarizations, make_params
+        """Test that amplitude peaks near end of waveform (merger)."""
+        from phentax.core.amplitude import compute_amplitude_coeffs_22, imr_amplitude
+        from phentax.core.internals import compute_waveform_params
+        from phentax.core.phase import compute_phase_coeffs_22, imr_omega
 
-        params = make_params(m1=30.0, m2=30.0)
-        times = jnp.linspace(-0.5, 0.05, 5000)
+        wf_params = compute_waveform_params(
+            m1=30.0,
+            m2=30.0,
+            s1z=0.0,
+            s2z=0.0,
+            distance=100.0,
+            inclination=0.0,
+            phi_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+        )
+        wf_params, phase_coeffs = compute_phase_coeffs_22(wf_params)
+        amp_coeffs = compute_amplitude_coeffs_22(wf_params, phase_coeffs)
 
-        hp, hc = compute_polarizations(times, params)
+        # Test in dimensionless time (M): inspiral → merger
+        times_M = jnp.linspace(-5000.0, 100.0, 2000)
+        amp = imr_amplitude(times_M, wf_params.eta, amp_coeffs, phase_coeffs)
 
-        # Amplitude should peak near t=0
-        amplitude = jnp.sqrt(hp**2 + hc**2)
-        peak_idx = jnp.argmax(amplitude)
-        peak_time = times[peak_idx]
+        peak_idx = jnp.argmax(jnp.abs(amp))
 
-        # Peak should be within 10ms of t=0
-        assert jnp.abs(peak_time) < 0.01
+        # Peak should be in the last 10% (near merger at t~0)
+        assert peak_idx > 0.9 * len(times_M)
 
     def test_frequency_increases_before_merger(self):
         """Test that frequency increases during inspiral (chirp)."""
-        from phentax import make_params
-        from phentax.internals import compute_derived_params, compute_phase_coeffs_22
-        from phentax.waveform import _compute_omega_22
+        from phentax.core.internals import compute_waveform_params
+        from phentax.core.phase import compute_phase_coeffs_22, imr_omega
 
-        params = make_params(m1=30.0, m2=30.0)
-        derived = compute_derived_params(params)
-        phase_coeffs = compute_phase_coeffs_22(derived)
+        wf_params = compute_waveform_params(
+            m1=30.0,
+            m2=30.0,
+            s1z=0.0,
+            s2z=0.0,
+            distance=100.0,
+            inclination=0.0,
+            phi_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+        )
 
-        times = jnp.linspace(-0.5, -0.1, 1000)
-        times_M = times / derived.M_sec
+        wf_params, phase_coeffs = compute_phase_coeffs_22(wf_params)
 
-        omega = _compute_omega_22(times_M, derived, phase_coeffs)
+        # Times in dimensionless units (M), inspiral region
+        times_M = jnp.linspace(-5000.0, -500.0, 1000)
+
+        omega = imr_omega(times_M, wf_params.eta, phase_coeffs)
 
         # Omega should generally increase (positive derivative)
-        # Check that most of the derivative is positive
-        # Note: In this simplified implementation, the interpolation regions
-        # may have some non-monotonic behavior. Relax threshold.
         domega = jnp.diff(omega)
         frac_positive = jnp.sum(domega > 0) / len(domega)
 
@@ -426,13 +471,32 @@ class TestPhysicalConsistency:
 
     def test_higher_mass_longer_waveform(self):
         """Test that higher mass systems have longer waveforms at fixed f_low."""
-        from phentax.internals import WaveformParams, compute_derived_params
+        from phentax.core.internals import compute_waveform_params
 
-        params_low = WaveformParams(10.0, 10.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0)
-        params_high = WaveformParams(50.0, 50.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0)
-
-        derived_low = compute_derived_params(params_low)
-        derived_high = compute_derived_params(params_high)
+        wf_params_low = compute_waveform_params(
+            m1=10.0,
+            m2=10.0,
+            s1z=0.0,
+            s2z=0.0,
+            distance=100.0,
+            inclination=0.0,
+            phi_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+        )
+        wf_params_high = compute_waveform_params(
+            m1=50.0,
+            m2=50.0,
+            s1z=0.0,
+            s2z=0.0,
+            distance=100.0,
+            inclination=0.0,
+            phi_ref=0.0,
+            psi=0.0,
+            f_ref=20.0,
+            f_min=20.0,
+        )
 
         # Higher mass = longer time scale
-        assert derived_high.M_sec > derived_low.M_sec
+        assert wf_params_high.M_sec > wf_params_low.M_sec
