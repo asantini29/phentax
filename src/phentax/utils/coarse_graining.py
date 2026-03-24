@@ -12,18 +12,23 @@ from functools import partial
 from typing import Callable
 
 import jax
+
 jax.config.update("jax_enable_x64", True)  # Use double precision for time calculations
 import jax.numpy as jnp
 from jaxtyping import Array
 
-SCALE_FACTOR = 12.0  # This is a tunable parameter that controls the overall density of the grid.
-BUCKET_SIZE = 2000  # Number of steps per bucket for JIT cache friendliness.  Must be >= 1.
+SCALE_FACTOR = (
+    12.0  # This is a tunable parameter that controls the overall density of the grid.
+)
+BUCKET_SIZE = (
+    2000  # Number of steps per bucket for JIT cache friendliness.  Must be >= 1.
+)
 
 
 def leading_order_factor(eta: float | Array) -> float | Array:
     """
     Compute the leading-order (positive) factor C in the adaptive time step formula.
-    
+
     Parameters
     ----------
     eta : float | Array
@@ -32,9 +37,10 @@ def leading_order_factor(eta: float | Array) -> float | Array:
     Returns
     -------
     float | Array
-        Leading-order factor C such that :math:`\\Delta t = C \cdot |t|^{3/8}` in the inspiral.
+        Leading-order factor C such that :math:`\\Delta t = C \\cdot |t|^{3/8}` in the inspiral.
     """
     return (2.0 * jnp.pi * 4.0 / SCALE_FACTOR) * jnp.power(eta / 5.0, 3.0 / 8.0)
+
 
 def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array:
     """
