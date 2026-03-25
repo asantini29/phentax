@@ -149,12 +149,12 @@ class PhaseCoeffs(eqx.Module):
     c4: float | Array
     c1_prec: float | Array
 
-    # int | Arrayermediate ansatz coefficients
+    # intermediate ansatz coefficients
     omegaMergerC1: float | Array
     omegaMergerC2: float | Array
     omegaMergerC3: float | Array
 
-    # int | Arrayermediate region values
+    # intermediate region values
     omegaCut: float | Array  # omega at inspiral cut
     domegaCut: float | Array  # domega/dt at inspiral cut
     domegaPeak: float | Array  # domega/dt at peak
