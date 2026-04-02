@@ -14,9 +14,9 @@ This package is currently released as a beta version, and it could still show so
 ### Installation from Package Index
 `phentax` can be installed directly with `pip`. Currently, the latest version is available on [TestPyPI](https://test.pypi.org/simple/). To install the latest version, run one of the following commands depending on your system configuration:
 ```
-pip install --index-url https://test.pypi.org/simple/ phentax[cpu] # For CPU-only installation
-pip install --index-url https://test.pypi.org/simple/ phentax[cuda12] # For GPU installation with CUDA 12.x support
-pip install --index-url https://test.pypi.org/simple/ phentax[cuda13] # For GPU installation with CUDA 13.x support
+uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cpu]' # For CPU-only installation
+uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda12]' # For GPU installation with CUDA 12.x support
+uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda13]' # For GPU installation with CUDA 13.x support
 ```
 
 ### Installation from source
