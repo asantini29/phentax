@@ -2333,7 +2333,7 @@ wheels = [
 
 [[package]]
 name = "phentax"
-version = "0.1.1b1"
+version = "0.1.1b2"
 source = { editable = "." }
 dependencies = [
     { name = "black" },

@@ -15,6 +15,6 @@ generation for compact binary coalescences using JAX.
 # Data structures
 from . import core, utils, waveform
 
-__version__ = "0.1.1b1"
+__version__ = "0.1.1b2"
 __copyright__ = "2025, Alessandro Santini"
 __author__ = "Alessandro Santini"
