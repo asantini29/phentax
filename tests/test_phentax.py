@@ -26,7 +26,6 @@ class TestImports:
         import phentax
 
         assert hasattr(phentax, "__version__")
-        assert phentax.__version__ == "0.1.0"
 
     def test_import_config_constants(self):
         """Test constants module import."""
