@@ -3,6 +3,7 @@
 [![Documentation](https://github.com/asantini29/phentax/actions/workflows/docs.yml/badge.svg)](https://asantini29.github.io/phentax/)
 [![TestPyPI](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ftest.pypi.org%2Fpypi%2Fphentax%2Fjson&query=%24.info.version&label=TestPyPI&logo=pypi)](https://test.pypi.org/project/phentax/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/asantini29/phentax/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/1116467177.svg)](https://doi.org/10.5281/zenodo.19390392)
 
 `phentax` is a JAX re-implementation of the IMRPhenomT and IMRPhenomTHM gravitational waveform models as implemented in the [`phenomxpy` package](https://gitlab.com/imrphenom-dev/phenomxpy).
 
@@ -76,6 +77,25 @@ The original `python` implementation of the IMRPhenomT(HM) waveform models in th
       archivePrefix={arXiv},
       primaryClass={gr-qc},
       url={https://arxiv.org/abs/2501.08261},
+}
+```
+At the moment, you can cite ``phentax`` as follows:
+```
+@software{alessandro_santini_2026_19390393,
+  author       = {Alessandro Santini},
+  title        = {asantini29/phentax: Release to TestPypi and Zenodo},
+  month        = apr,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v0.1.1b2},
+  doi          = {10.5281/zenodo.19390393},
+  url          = {https://doi.org/10.5281/zenodo.19390393},
+  swhid        = {swh:1:dir:53eb9b80c35ee46f3c47856646bf2e527cc9b31c
+                   ;origin=https://doi.org/10.5281/zenodo.19390392;vi
+                   sit=swh:1:snp:491e9d7331ce8a58625a229398fc5dac141f
+                   0e16;anchor=swh:1:rel:c6c621c39a87fd9673d834d3a289
+                   bd72f71ec7e2;path=asantini29-phentax-19563e0
+                  },
 }
 ```
 
