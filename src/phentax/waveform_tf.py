@@ -1828,7 +1828,7 @@ class IMRPhenomTHM_TF:
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
 
-    # @jax.jit(static_argnums=[0,16])
+    @jax.jit(static_argnums=[0,16])
     def get_tf_fresnel_waveform_vanilla_TF_midpoint(self,
                                 time_grid: Array,
                                 frequency_grid: Array,
@@ -1982,8 +1982,6 @@ class IMRPhenomTHM_TF:
                 t_1 = time_grid[time_index+1]
 
                 t_midpoint = t_grid_midpoints[time_index]
-
-                print(t_0,t_1,t_midpoint)
 
                 # Convert t_0 to mass units for each binary for each binary
                 # (TODO: can be taken out of the loop, can be an array operation as we know the time-grid apriori so can be vmapped across that )
