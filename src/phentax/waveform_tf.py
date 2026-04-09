@@ -1966,135 +1966,100 @@ class IMRPhenomTHM_TF:
         # Frequency grid spacing (assumed uniform)
         dF = frequency_grid[1] - frequency_grid[0]
 
-        # Waveform storage container, will be combined into TF later
-        waveform_storage = jnp.zeros((time_grid.size,num_sources,n_modes,2*closest_f_bins), dtype=jnp.complex128)
+        # Build per-step inputs and scan over time tranches to keep the loop JAX-native.
+        t0_all = time_grid[:-1]
+        t1_all = time_grid[1:]
+        tmid_all = t_grid_midpoints
+        tmid_mass_all = jax.vmap(
+            lambda t_mid: jax.vmap(second_to_mass, in_axes=(None, 0))(
+                t_mid + min_time_s_units, wf_params.total_mass
+            )
+        )(tmid_all)
+        amps_all = amplitudes.transpose(2, 0, 1)
+        phases_all = phases.transpose(2, 0, 1)
 
-        # Storage for frequency indices at each time step (# 2*closest_f_bins because we are storing bins on either side of the closest frequency for each harmonic for each time)
-        frequency_indices_storage = jnp.zeros((time_grid.size,num_sources,n_modes,2*closest_f_bins), dtype=jnp.int32)
+        def scan_step(_, scan_inputs):
+            t_0, t_1, t_midpoint, t_midpoint_mass, Amps, Phases = scan_inputs
 
-        #tf grid 
-        # tf_grid = jnp.zeros((num_sources,time_grid.size, frequency_grid.size), dtype=jnp.complex128)
+            f_0 = jax.vmap(
+                lambda t, eta, pc: jax.vmap(lambda p: imr_omega(t, eta, p))(pc)
+            )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)
 
-        # In principle can also be vmapped over time steps here, however I think it would be completely unreadable and a nightmare to debug/maintain.. 
-        for time_index in range(time_grid.size - 1):  # -1 to avoid index out of bounds with t_1
-                
-                t_0 = time_grid[time_index]
-                t_1 = time_grid[time_index+1]
+            f_dot = jax.vmap(
+                lambda t, eta, pc: jax.vmap(lambda p: imr_omega_dot(t, eta, p))(pc)
+            )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)
 
-                t_midpoint = t_grid_midpoints[time_index]
+            f_0 = jax.vmap(mass_to_hz, in_axes=(0, 0))(f_0, wf_params.total_mass)
+            f_dot = jax.vmap(df_dt_to_Hz_squared, in_axes=(0, 0))(f_dot, wf_params.total_mass)
 
-                # Convert t_0 to mass units for each binary for each binary
-                # (TODO: can be taken out of the loop, can be an array operation as we know the time-grid apriori so can be vmapped across that )
-                # t_0_mass = jax.vmap(second_to_mass, in_axes=(None, 0))(t_0 + min_time_s_units, wf_params.total_mass) # nSources, 
-                t_midpoint_mass = jax.vmap(second_to_mass, in_axes=(None, 0))(t_midpoint + min_time_s_units, wf_params.total_mass) # nSources, 
+            closest_frequency_indexes = jnp.round((f_0 - frequency_grid[0]) / dF).astype(jnp.int32)
+            closest_frequency_indexes = jnp.clip(
+                closest_frequency_indexes, 0, frequency_grid.size - 1
+            )
+            closest_frequencies = frequency_grid[closest_frequency_indexes]
 
-                Amps = amplitudes[:,:, time_index] # Source, #Mode , # Time  Evaluated at midpoint
-                Phases = phases[:,:, time_index]   # Source, #Mode , # Time  Evaluated at midpoint 
-                # overall_phase_coeffs contains phase coeffs for all modes at once for all binaries (Only positive modes remember)
-                # Using this compute f_0 and f_dot for each source and each mode at this time
-                # 
-                # Shapes:
-                #   t_0_mass: (num_sources,)
-                #   wf_params.eta: (num_sources,)
-                #   overall_phase_coeffs: dictionary like structure but each field has shape (num_sources, num_modes, ...)
-                #
-                # Nested vmap explanation:
-                # -------------------------
-                # We need to compute imr_omega for every (source, mode) combination.
-                # 
-                # OUTER vmap (over sources):
-                #   - Iterates over axis 0 of t_0_mass, eta, and overall_phase_coeffs
-                #   - For source i: t_0_mass[i] is scalar, eta[i] is scalar, 
-                #     overall_phase_coeffs[i] is a pytree with shape (num_modes, ...) per field
-                #
-                # INNER vmap (over modes for a single source):
-                #   - For a single source, iterates over axis 0 of phase_coeffs (the modes axis)
-                #   - Computes imr_omega(t, eta, p) for each mode's phase coeffs p
-                #   - t and eta are fixed scalars from the outer vmap
-                #
-                # Result: f_0 has shape (num_sources, num_modes) (same with f_dot)
-                
-                # pc is the phase coefficents for a single source, shape (num_modes, ...), p is the phase coeffs for a single mode, shape (...)
-                f_0 = jax.vmap(
-                    lambda t, eta, pc: jax.vmap(lambda p: imr_omega(t, eta, p))(pc)
-                )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)  # IN MASS UNITS
+            frequencies = jax.vmap(
+                lambda center_freqs: jnp.arange(0, 2 * closest_f_bins) * dF
+                + center_freqs
+                - closest_f_bins * dF
+            )(closest_frequencies.flatten()).reshape(
+                num_sources, n_modes, 2 * closest_f_bins
+            )
 
-                f_dot = jax.vmap(
-                    lambda t, eta, pc: jax.vmap(lambda p: imr_omega_dot(t, eta, p))(pc)
-                )(t_midpoint_mass, wf_params.eta, overall_phase_coeffs) / (2 * jnp.pi)  # IN MASS UNITS
-                # print('F dot (mass units) shape:', f_dot.shape)
+            frequency_indices = jax.vmap(
+                lambda indices: jnp.arange(0, 2 * closest_f_bins)
+                + indices
+                - closest_f_bins
+            )(closest_frequency_indexes.flatten()).reshape(
+                num_sources, n_modes, 2 * closest_f_bins
+            )
 
-                # Convert f_0 and f_dot to Hz and Hz^2 respectively
-                f_0 = jax.vmap(mass_to_hz, in_axes=(0, 0))(f_0, wf_params.total_mass)
-                f_dot = jax.vmap(df_dt_to_Hz_squared, in_axes=(0, 0))(f_dot, wf_params.total_mass)
+            h_prefactor = (
+                Amps[:, :, jnp.newaxis]
+                * jnp.exp(1j * Phases[:, :, jnp.newaxis])
+                / jnp.sqrt(2 * f_dot[:, :, jnp.newaxis])
+                * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
+                * jnp.exp(
+                    -1j
+                    * jnp.pi
+                    * ((f_0[:, :, jnp.newaxis] - frequencies) ** 2)
+                    / f_dot[:, :, jnp.newaxis]
+                )
+            )
 
+            v_nm_end = v(f_dot, t_midpoint, t_1, frequencies, f_0)
+            v_nm_begin = v(f_dot, t_midpoint, t_0, frequencies, f_0)
+            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
+            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
 
-                # print('F0 (Hz) shape:', f_0.shape) 
-                # print('F dot (Hz^2) shape:', f_dot.shape)
+            I = C_vn_end - C_vn_begin + 1j * (S_vn_end - S_vn_begin)
+            waveform = h_prefactor * I
 
-                # NOTE: the potential for frequencies around f0 going out of bounds is dealt with later. 
+            return None, (waveform, frequency_indices)
 
-                # Compute closest frequency indexes in the grid for each source and mode
-                # Uniform grid → direct arithmetic instead of materializing an (nSrc, nMode, nFreq) tensor
-                closest_frequency_indexes = jnp.round((f_0 - frequency_grid[0]) / dF).astype(jnp.int32)
-                closest_frequency_indexes = jnp.clip(closest_frequency_indexes, 0, frequency_grid.size - 1)
-                closest_frequencies = frequency_grid[closest_frequency_indexes] 
-                # Closest frequency shape is (num_sources, num_modes) and closest frequency indexes is also (num_sources, num_modes). 
-                # Same shape as f_0 and f_dot
+        _, (waveform_steps, frequency_indices_steps) = jax.lax.scan(
+            scan_step,
+            None,
+            (t0_all, t1_all, tmid_all, tmid_mass_all, amps_all, phases_all),
+        )
 
-                # print('Closest frequency indexes shape:', closest_frequency_indexes.shape,closest_frequency_indexes.flatten().shape)
-
-                # for every frequency in closest_frequencies, generate a frequency array around it +/- closest_f_bins by going in steps of dF
-                frequencies = jax.vmap(
-                    lambda center_freqs: jnp.arange(
-                        0,
-                        2*closest_f_bins,
-                    ) * dF + center_freqs - closest_f_bins*dF, # Starting from center_freqs - closest_f_bins*dF to center_freqs + closest_f_bins*dF
-                )(closest_frequencies.flatten()).reshape(num_sources,n_modes,2*closest_f_bins)  #
-                # shape of frequencies is (num_sources, num_modes, 2*closest_f_bins) 
-
-                # Holds indices for each frequency in frequencies, which will be used to place the waveform values in the correct position in the final tf grid.
-                frequency_indices = jax.vmap(
-                    lambda indices: jnp.arange(
-                        0,
-                        2*closest_f_bins,
-                    )+ indices - closest_f_bins, # Starting from indices - closest_f_bins to indices + closest_f_bins
-                )(closest_frequency_indexes.flatten()).reshape(num_sources,n_modes,2*closest_f_bins)
-
-                # print('Frequencies shape:', frequencies.shape)
-                # print('Frequencies:', frequencies)
-                # print('Frequency indices shape:', frequency_indices.shape)
-                # print('Frequency indices:', frequency_indices)
-                
-                # The newaxis here is accounting for the frequency dimension, 
-                #     remember we generated a single A, f, f_dot for each source and mode,
-                #      but now we have an array of frequencies for each source and mode, so we need to add a new axis to Amps,
-                #      Phases, f_0 and f_dot to allow for broadcasting when computing the waveform values for each frequency.
-                
-
-                h_prefactor = Amps[:,:,jnp.newaxis]*jnp.exp(1j*Phases[:,:,jnp.newaxis])/jnp.sqrt(2*f_dot[:,:,jnp.newaxis]) * jnp.exp(-2*1j*jnp.pi*frequencies*(t_midpoint-t_0)) * jnp.exp(-1j*jnp.pi*((f_0[:,:,jnp.newaxis] - frequencies)**2)/f_dot[:,:,jnp.newaxis])
-
-                # Fresnel integral stuff (all )
-                v_nm_end = v(f_dot,t_midpoint,t_1,frequencies,f_0)
-                v_nm_begin = v(f_dot,t_midpoint,t_0,frequencies,f_0)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
-
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-                waveform = h_prefactor * I
-                
-                # Store each waveform in its own 'tf grid' for now. 
-                # NOTE: Final implementation will use something much closer to the direct likelihood/inner product computation. Maybe....
-                # NOTE: In its current form this is *NOT* the actual TF grid, the frequency axis has not yet been placed in the correct position,
-                #         we are just storing the waveforms for each time step and each mode in a temporary array here, 
-                waveform_storage = waveform_storage.at[time_index,:,:,:].set(waveform)
-
-                # Store the corresponding frequency indices for each waveform value, which will be used to place the values in the correct position in the final tf grid.
-                frequency_indices_storage = frequency_indices_storage.at[time_index,:,:,:].set(frequency_indices)
+        # Keep one trailing zero step to preserve legacy output shape.
+        waveform_storage = jnp.concatenate(
+            [
+                waveform_steps,
+                jnp.zeros((1, num_sources, n_modes, 2 * closest_f_bins), dtype=jnp.complex128),
+            ],
+            axis=0,
+        )
+        frequency_indices_storage = jnp.concatenate(
+            [
+                frequency_indices_steps,
+                jnp.zeros((1, num_sources, n_modes, 2 * closest_f_bins), dtype=jnp.int32),
+            ],
+            axis=0,
+        )
 
         # Note in theory one can do the direct likelihood/inner product computation directly from waveform storage I think. 
-
-
         # TEMPORARY/DEV
         # Transpose to (num_sources, num_times, num_modes, 2*closest_f_bins) for vmapping (basically changing around order of axes)
         waveform_storage_transposed = waveform_storage.transpose(1, 0, 2, 3)
