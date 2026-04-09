@@ -11,7 +11,7 @@ IMRPhenomTHM interface class for waveform generation.
 """
 
 from typing import Optional
-
+import math
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -1321,6 +1321,7 @@ class IMRPhenomTHM:
             Phase coefficients for the (2,2) mode.
         """
 
+        '''
         # throw an error if any of the two spins is larger than 1
         assert jnp.all(
             jnp.abs(jnp.atleast_1d(chi1z)) <= 1
@@ -1328,6 +1329,11 @@ class IMRPhenomTHM:
         assert jnp.all(
             jnp.abs(jnp.atleast_1d(chi2z)) <= 1
         ), "Spin must be between -1 and 1"
+        '''
+         #Fix 
+        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+            assert jnp.all(jnp.abs(jnp.atleast_1d(chi1z)) <= 1), "Spin must be between -1 and 1"
+            assert jnp.all(jnp.abs(jnp.atleast_1d(chi2z)) <= 1), "Spin must be between -1 and 1"
 
         wf_params = self._process_parameters(
             m1,
@@ -1351,23 +1357,31 @@ class IMRPhenomTHM:
         if T is None:
             T = self.T
 
-        num_steps = int(jnp.ceil(T / delta_t))
+        # Second fix 
+        #num_steps = int(jnp.ceil(T / delta_t))
+        num_steps = math.ceil(T / delta_t)
 
         # Lazily initialise the adaptive grid size on first call so that
         # (T, delta_t) are known.  If T or delta_t grow in a later call
         # we update, but only when the new estimate falls into a larger
         # BUCKET_SIZE-bucket — so recompilation is rare and bounded.
-        # if self.coarse_grain:
-        # compute this even without coarse graining to allow users to extract the adaptive grid size for their own use.
-        new_max = estimate_adaptive_steps_from_T(T, delta_t)
-        if self.max_adaptive_steps is None or new_max > self.max_adaptive_steps:
-            self.max_adaptive_steps = new_max
-            logger.debug(
-                "Adaptive grid max_steps set to %d (T=%.1f, delta_t=%.1f)",
-                self.max_adaptive_steps,
-                T,
-                delta_t,
-            )
+        # Third fix: guard with isinstance Tracer so estimate_adaptive_steps_from_T
+        # (which calls jnp.* and then int() on the result) is never called during
+        # JIT tracing — only on concrete calls.  Without this guard, the function
+        # runs inside jax.jit, jnp.asarray(python_float) produces an abstract
+        # tracer, and int(jnp.ceil(tracer)) raises ConcretizationTypeError.
+        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+            # compute this even without coarse graining to allow users to
+            # extract the adaptive grid size for their own use.
+            new_max = estimate_adaptive_steps_from_T(T, delta_t)
+            if self.max_adaptive_steps is None or new_max > self.max_adaptive_steps:
+                self.max_adaptive_steps = new_max
+                logger.debug(
+                    "Adaptive grid max_steps set to %d (T=%.1f, delta_t=%.1f)",
+                    self.max_adaptive_steps,
+                    T,
+                    delta_t,
+                )
         times, times_mask = self.get_time_grids(wf_params, num_steps)
 
         # store the parameters to access the coarse-grained time array if needed
