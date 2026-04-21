@@ -9,14 +9,13 @@ Internals
 Internal data structures and coefficient computation for IMRPhenomT(HM).
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
 from ..utils.constants import MRSUN_SI, MTSUN_SI, PC_SI
-from ..utils.utility import hz_to_mass, m1ofeta, m2ofeta, mass_to_hz, second_to_mass
+from ..utils.utility import hz_to_mass, m1ofeta, m2ofeta, second_to_mass, to_batch
 from . import fits
 
 
@@ -322,6 +321,12 @@ def compute_waveform_params(
             rtol,
         )
     else:
+        n = m1.shape[0]
+        f_ref = to_batch(f_ref, n)
+        f_min = to_batch(f_min, n)
+        t_min = to_batch(t_min, n)
+        t_ref = to_batch(t_ref, n)
+
         return jax.vmap(
             _compute_waveform_params,
             in_axes=(
@@ -333,11 +338,11 @@ def compute_waveform_params(
                 0,
                 0,
                 0,
+                0,
+                0,
                 None,
-                None,
-                None,
-                None,
-                None,
+                0,
+                0,
                 None,
                 None,
                 None,
