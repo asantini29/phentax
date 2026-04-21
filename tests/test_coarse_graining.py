@@ -1,6 +1,3 @@
-# Copyright (C) 2025 Alessandro Santini
-# SPDX-License-Identifier: MIT
-
 """Tests for coarse_graining.py fixes:
 1. Adaptive grid first point equals tmin exactly.
 2. Post-merger step is max(C, Mdelta_t), never over-sampling relative to

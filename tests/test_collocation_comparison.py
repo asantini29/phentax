@@ -1,5 +1,3 @@
-# Copyright (C) 2024 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Tests comparing pseudo-PN coefficients between phentax and phenomxpy.
 
