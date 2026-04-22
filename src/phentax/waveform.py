@@ -10,8 +10,9 @@ Waveform
 IMRPhenomTHM interface class for waveform generation.
 """
 
-from typing import Optional
 import math
+from typing import Optional
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -444,13 +445,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[WaveformParams, Array, Array, Array, Array]:
         """
@@ -470,20 +471,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If set, it overrides the default value.
         Returns
@@ -508,13 +509,13 @@ class IMRPhenomTHM:
                 chi2z,
                 distance,
                 phi_ref,
-                f_ref,
-                f_min,
                 inclination,
                 psi,
                 delta_t,
                 t_min,
                 t_ref,
+                f_min,
+                f_ref,
                 T,  # override default total observation time
             )
         )
@@ -536,13 +537,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[Array, Array, Array]:
         """
@@ -562,20 +563,21 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
             Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If sets, it overrides the default value.
 
@@ -596,13 +598,13 @@ class IMRPhenomTHM:
             chi2z,
             distance,
             phi_ref,
-            f_ref,
-            f_min,
             inclination,
             psi,
             delta_t,
             t_min,
             t_ref,
+            f_min,
+            f_ref,
             T,
         )
 
@@ -628,13 +630,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[Array, Array, Array]:
         """
@@ -654,20 +656,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If sets, it overrides the default value.
 
@@ -687,13 +689,13 @@ class IMRPhenomTHM:
             chi2z,
             distance,
             phi_ref,
-            f_ref,
-            f_min,
             inclination,
             psi,
             delta_t,
             t_min,
             t_ref,
+            f_min,
+            f_ref,
             T,
         )
 
@@ -724,13 +726,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[Array, Array, Array, Array]:
         """
@@ -751,20 +753,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If sets, it overrides the default value.
 
@@ -786,13 +788,13 @@ class IMRPhenomTHM:
             chi2z,
             distance,
             phi_ref,
-            f_ref,
-            f_min,
             inclination,
             psi,
             delta_t,
             t_min,
             t_ref,
+            f_min,
+            f_ref,
             T,
         )
 
@@ -809,13 +811,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[Array, Array, Array, Array]:
         """
@@ -835,20 +837,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If sets, it overrides the default value.
 
@@ -870,13 +872,13 @@ class IMRPhenomTHM:
             chi2z,
             distance,
             phi_ref,
-            f_ref,
-            f_min,
             inclination,
             psi,
             delta_t,
             t_min,
             t_ref,
+            f_min,
+            f_ref,
             T,
         )
 
@@ -984,13 +986,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
-        inclination: float,
+        inclination: float | Array,
         psi: float | Array,
-        delta_t: float = 15.0,
-        t_min: float = jnp.nan,
-        t_ref: float = jnp.nan,
+        delta_t: float | Array = 15.0,
+        t_min: float | Array = jnp.nan,
+        t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[Array, Array, Array, Array]:
         """
@@ -1010,20 +1012,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
-        inclination : float
+        inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If set, it overrides the default value.
 
@@ -1047,13 +1049,13 @@ class IMRPhenomTHM:
                 chi2z,
                 distance,
                 phi_ref,
-                f_ref,
-                f_min,
                 inclination,
                 psi,
                 delta_t,
                 t_min,
                 t_ref,
+                f_min,
+                f_ref,
                 T,
             )
         )
@@ -1128,13 +1130,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
         inclination: float | Array,
         psi: float | Array,
         delta_t: float | Array = 15.0,
         t_min: float | Array = jnp.nan,
         t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
     ) -> WaveformParams:
         """
         Process input parameters and compute derived parameters.
@@ -1154,20 +1156,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
         inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float | Array, default 5.0
             Time step for waveform generation in seconds.
-        t_min : float | Array, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float | Array, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
 
         Returns
         -------
@@ -1263,13 +1265,13 @@ class IMRPhenomTHM:
         chi2z: float | Array,
         distance: float | Array,
         phi_ref: float | Array,
-        f_ref: float | Array,
-        f_min: float | Array,
         inclination: float | Array,
         psi: float | Array,
         delta_t: float | Array = 15.0,
         t_min: float | Array = jnp.nan,
         t_ref: float | Array = jnp.nan,
+        f_min: float | Array = 1e-4,
+        f_ref: float | Array = 1e-4,
         T: float | None = None,
     ) -> tuple[WaveformParams, Array, Array, AmplitudeCoeffs, PhaseCoeffs]:
         """
@@ -1289,20 +1291,20 @@ class IMRPhenomTHM:
             Luminosity distance to the binary in megaparsecs.
         phi_ref : float | Array
             Reference phase at frequency f_ref in radians.
-        f_ref : float | Array
-            Reference frequency in Hz.
-        f_min : float | Array
-            Minimum frequency in Hz.
         inclination : float | Array
             Inclination angle of the binary in radians.
         psi : float | Array
             Polarization angle in radians.
         delta_t : float | Array, default 15.0
             Time step for waveform generation in seconds.
-        t_min : float | Array, default jnp.nan
-            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency.
-        t_ref : float | Array, default jnp.nan
-            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency.
+        t_min : float | Array | Array, default jnp.nan
+            Minimum time for waveform generation in seconds. If NaN, will be set by the minimum frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        t_ref : float | Array | Array, default jnp.nan
+            Reference time for waveform generation in seconds. If NaN, will be set by the reference frequency. Otherwise, it must be set according with the merger time being at :math:`t=0`.
+        f_min : float | Array, default 1e-4
+            Minimum frequency in Hz. Used if t_min is NaN to set the minimum time for waveform generation.
+        f_ref : float | Array, default 1e-4
+            Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If sets, it overrides the default value.
 
@@ -1321,7 +1323,7 @@ class IMRPhenomTHM:
             Phase coefficients for the (2,2) mode.
         """
 
-        '''
+        """
         # throw an error if any of the two spins is larger than 1
         assert jnp.all(
             jnp.abs(jnp.atleast_1d(chi1z)) <= 1
@@ -1329,11 +1331,31 @@ class IMRPhenomTHM:
         assert jnp.all(
             jnp.abs(jnp.atleast_1d(chi2z)) <= 1
         ), "Spin must be between -1 and 1"
-        '''
-         #Fix 
+        """
+        # Fix
         if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
-            assert jnp.all(jnp.abs(jnp.atleast_1d(chi1z)) <= 1), "Spin must be between -1 and 1"
-            assert jnp.all(jnp.abs(jnp.atleast_1d(chi2z)) <= 1), "Spin must be between -1 and 1"
+            assert jnp.all(
+                jnp.abs(jnp.atleast_1d(chi1z)) <= 1
+            ), "Spin must be between -1 and 1"
+            assert jnp.all(
+                jnp.abs(jnp.atleast_1d(chi2z)) <= 1
+            ), "Spin must be between -1 and 1"
+
+        if jnp.isnan(t_min).any():
+            if jnp.isnan(f_min).any():
+                raise ValueError(
+                    "If t_min is NaN, f_min must be set to a finite value."
+                )
+            else:
+                logger.debug("Setting t_min based on f_min")
+
+        if jnp.isnan(t_ref).any():
+            if jnp.isnan(f_ref).any():
+                raise ValueError(
+                    "If t_ref is NaN, f_ref must be set to a finite value."
+                )
+            else:
+                logger.debug("Setting t_ref based on f_ref")
 
         wf_params = self._process_parameters(
             m1,
@@ -1342,13 +1364,13 @@ class IMRPhenomTHM:
             chi2z,
             distance,
             phi_ref,
-            f_ref,
-            f_min,
             inclination,
             psi,
             delta_t,
             t_min,
             t_ref,
+            f_min,
+            f_ref,
         )
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = jax.vmap(
             self._compute_coeffs_22
@@ -1357,8 +1379,8 @@ class IMRPhenomTHM:
         if T is None:
             T = self.T
 
-        # Second fix 
-        #num_steps = int(jnp.ceil(T / delta_t))
+        # Second fix
+        # num_steps = int(jnp.ceil(T / delta_t))
         num_steps = math.ceil(T / delta_t)
 
         # Lazily initialise the adaptive grid size on first call so that

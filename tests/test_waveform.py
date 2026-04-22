@@ -35,7 +35,7 @@ def test_waveform_comparison(m1, m2, f_min, delta_t, case_name):
 
     tlowfit = True
     tol = 1e-12
-    
+
     # Set appropriate observation time based on the system
     # For LIGO-like systems (stellar mass BHs), use ~10 seconds
     # For LISA-like systems (supermassive BHs), use default (3 months)
@@ -60,11 +60,11 @@ def test_waveform_comparison(m1, m2, f_min, delta_t, case_name):
         chi2,
         distance,
         phi_ref,
-        f_ref,
-        f_min,
         inclination,
         psi,
         delta_t=delta_t,
+        f_min=f_min,
+        f_ref=f_ref,
     )
     logger.info(f"PHENTAX polarizations computed in {time.time() - st} WARMUP seconds")
 
@@ -76,11 +76,11 @@ def test_waveform_comparison(m1, m2, f_min, delta_t, case_name):
         chi2,
         distance,
         phi_ref,
-        f_ref,
-        f_min,
         inclination,
         psi,
         delta_t=delta_t,
+        f_min=f_min,
+        f_ref=f_ref,
     )
     logger.info(f"PHENTAX polarizations computed in {time.time() - st} seconds")
 
@@ -171,7 +171,7 @@ def test_waveform_comparison(m1, m2, f_min, delta_t, case_name):
 @pytest.mark.parametrize("m1, m2, f_min, delta_t, case_name", TEST_CASES)
 def test_time_grid_correctness(m1, m2, f_min, delta_t, case_name):
     """
-    Test that both coarse-grained (adaptive) and uniform time grids produce 
+    Test that both coarse-grained (adaptive) and uniform time grids produce
     correct waveforms and compare their performance.
     """
     print(f"\nTesting time grid correctness for: {case_name}")
@@ -182,15 +182,15 @@ def test_time_grid_correctness(m1, m2, f_min, delta_t, case_name):
     phi_ref = 0.0
     psi = 0.0
     f_ref = f_min
-    
+
     tlowfit = True
     tol = 1e-12
-    
+
     # Set appropriate observation time based on the system
     # For LIGO-like systems (stellar mass BHs), use ~10 seconds
     # For LISA-like systems (supermassive BHs), use default (3 months)
     T = 10.0 if case_name == "ligo_like" else None
-    
+
     # Test with coarse_grain=True (adaptive grid)
     print(f"  Testing adaptive grid (coarse_grain=True)...")
     jax.clear_caches()
@@ -203,38 +203,52 @@ def test_time_grid_correctness(m1, m2, f_min, delta_t, case_name):
         rtol=tol,
         T=T,
     )
-    
+
     # Warmup call
     times_adaptive, mask_adaptive, h_plus_adaptive, h_cross_adaptive = (
         imr_adaptive.compute_polarizations_at_once(
-            m1, m2, chi1, chi2,
-            distance, phi_ref, f_ref, f_min,
-            inclination, psi,
+            m1,
+            m2,
+            chi1,
+            chi2,
+            distance,
+            phi_ref,
+            inclination,
+            psi,
             delta_t=delta_t,
+            f_min=f_min,
+            f_ref=f_ref,
         )
     )
-    
+
     # Timed call
     st = time.time()
     times_adaptive, mask_adaptive, h_plus_adaptive, h_cross_adaptive = (
         imr_adaptive.compute_polarizations_at_once(
-            m1, m2, chi1, chi2,
-            distance, phi_ref, f_ref, f_min,
-            inclination, psi,
+            m1,
+            m2,
+            chi1,
+            chi2,
+            distance,
+            phi_ref,
+            inclination,
+            psi,
             delta_t=delta_t,
+            f_min=f_min,
+            f_ref=f_ref,
         )
     )
     times_adaptive.block_until_ready()
     time_adaptive = time.time() - st
-    
+
     valid_points_adaptive = mask_adaptive.sum()
     grid_size_adaptive = times_adaptive.shape[-1]
-    
+
     logger.info(
         f"  Adaptive grid - Time: {time_adaptive:.4f}s, "
         f"Grid size: {grid_size_adaptive}, Valid points: {valid_points_adaptive}"
     )
-    
+
     # Test with coarse_grain=False (uniform grid)
     print(f"  Testing uniform grid (coarse_grain=False)...")
     jax.clear_caches()
@@ -247,111 +261,127 @@ def test_time_grid_correctness(m1, m2, f_min, delta_t, case_name):
         rtol=tol,
         T=T,
     )
-    
+
     # Warmup call
     times_uniform, mask_uniform, h_plus_uniform, h_cross_uniform = (
         imr_uniform.compute_polarizations_at_once(
-            m1, m2, chi1, chi2,
-            distance, phi_ref, f_ref, f_min,
-            inclination, psi,
+            m1,
+            m2,
+            chi1,
+            chi2,
+            distance,
+            phi_ref,
+            inclination,
+            psi,
             delta_t=delta_t,
+            f_min=f_min,
+            f_ref=f_ref,
         )
     )
-    
+
     # Timed call
     st = time.time()
     times_uniform, mask_uniform, h_plus_uniform, h_cross_uniform = (
         imr_uniform.compute_polarizations_at_once(
-            m1, m2, chi1, chi2,
-            distance, phi_ref, f_ref, f_min,
-            inclination, psi,
+            m1,
+            m2,
+            chi1,
+            chi2,
+            distance,
+            phi_ref,
+            inclination,
+            psi,
             delta_t=delta_t,
+            f_min=f_min,
+            f_ref=f_ref,
         )
     )
     times_uniform.block_until_ready()
     time_uniform = time.time() - st
-    
+
     valid_points_uniform = mask_uniform.sum()
     grid_size_uniform = times_uniform.shape[-1]
-    
+
     logger.info(
         f"  Uniform grid - Time: {time_uniform:.4f}s, "
         f"Grid size: {grid_size_uniform}, Valid points: {valid_points_uniform}"
     )
-    
+
     # Performance comparison
     speedup = time_uniform / time_adaptive if time_adaptive > 0 else 1.0
-    efficiency_adaptive = (valid_points_adaptive / grid_size_adaptive * 100)
-    efficiency_uniform = (valid_points_uniform / grid_size_uniform * 100)
-    
+    efficiency_adaptive = valid_points_adaptive / grid_size_adaptive * 100
+    efficiency_uniform = valid_points_uniform / grid_size_uniform * 100
+
     logger.info(
         f"  Performance - Speedup: {speedup:.2f}x, "
         f"Adaptive efficiency: {efficiency_adaptive:.1f}%, "
         f"Uniform efficiency: {efficiency_uniform:.1f}%"
     )
-    
+
     # Verify correctness: both grids should produce similar waveforms
     # Interpolate adaptive grid results onto uniform grid times for comparison
     from scipy.interpolate import CubicSpline as _CubicSpline
-    
+
     # Extract valid times and waveforms
     times_adaptive_valid = np.asarray(times_adaptive[mask_adaptive])
     h_plus_adaptive_valid = np.asarray(h_plus_adaptive[mask_adaptive])
     h_cross_adaptive_valid = np.asarray(h_cross_adaptive[mask_adaptive])
-    
+
     times_uniform_valid = np.asarray(times_uniform[mask_uniform])
     h_plus_uniform_valid = np.asarray(h_plus_uniform[mask_uniform])
     h_cross_uniform_valid = np.asarray(h_cross_uniform[mask_uniform])
-    
+
     # Find common time range
     t_min = max(times_adaptive_valid.min(), times_uniform_valid.min())
     t_max = min(times_adaptive_valid.max(), times_uniform_valid.max())
-    
+
     # Filter to common range
-    mask_adaptive_common = (times_adaptive_valid >= t_min) & (times_adaptive_valid <= t_max)
-    mask_uniform_common = (times_uniform_valid >= t_min) & (times_uniform_valid <= t_max)
-    
+    mask_adaptive_common = (times_adaptive_valid >= t_min) & (
+        times_adaptive_valid <= t_max
+    )
+    mask_uniform_common = (times_uniform_valid >= t_min) & (
+        times_uniform_valid <= t_max
+    )
+
     times_adaptive_common = times_adaptive_valid[mask_adaptive_common]
     h_plus_adaptive_common = h_plus_adaptive_valid[mask_adaptive_common]
     h_cross_adaptive_common = h_cross_adaptive_valid[mask_adaptive_common]
-    
+
     times_uniform_common = times_uniform_valid[mask_uniform_common]
     h_plus_uniform_common = h_plus_uniform_valid[mask_uniform_common]
     h_cross_uniform_common = h_cross_uniform_valid[mask_uniform_common]
-    
+
     # Interpolate adaptive results onto uniform times
     spline_plus = _CubicSpline(times_adaptive_common, h_plus_adaptive_common)
     spline_cross = _CubicSpline(times_adaptive_common, h_cross_adaptive_common)
-    
+
     h_plus_adaptive_interp = spline_plus(times_uniform_common)
     h_cross_adaptive_interp = spline_cross(times_uniform_common)
-    
+
     # Check agreement at different tolerances
     # More lenient tolerance due to interpolation and different grid spacing
     isclose_plus = jnp.allclose(
-        h_plus_uniform_common, h_plus_adaptive_interp, 
-        rtol=1e-3, atol=1e-10
+        h_plus_uniform_common, h_plus_adaptive_interp, rtol=1e-3, atol=1e-10
     )
     isclose_cross = jnp.allclose(
-        h_cross_uniform_common, h_cross_adaptive_interp,
-        rtol=1e-3, atol=1e-10
+        h_cross_uniform_common, h_cross_adaptive_interp, rtol=1e-3, atol=1e-10
     )
-    
+
     # Calculate maximum relative error
     rel_err_plus = jnp.max(
-        jnp.abs(h_plus_uniform_common - h_plus_adaptive_interp) / 
-        (jnp.abs(h_plus_uniform_common) + 1e-20)
+        jnp.abs(h_plus_uniform_common - h_plus_adaptive_interp)
+        / (jnp.abs(h_plus_uniform_common) + 1e-20)
     )
     rel_err_cross = jnp.max(
-        jnp.abs(h_cross_uniform_common - h_cross_adaptive_interp) / 
-        (jnp.abs(h_cross_uniform_common) + 1e-20)
+        jnp.abs(h_cross_uniform_common - h_cross_adaptive_interp)
+        / (jnp.abs(h_cross_uniform_common) + 1e-20)
     )
-    
+
     logger.info(
         f"  Waveform agreement - Max rel. error h_plus: {rel_err_plus:.2e}, "
         f"h_cross: {rel_err_cross:.2e}"
     )
-    
+
     assert isclose_plus, (
         f"h_plus mismatch between adaptive and uniform grids for {case_name}. "
         f"Max rel. error: {rel_err_plus:.2e}"
@@ -360,7 +390,9 @@ def test_time_grid_correctness(m1, m2, f_min, delta_t, case_name):
         f"h_cross mismatch between adaptive and uniform grids for {case_name}. "
         f"Max rel. error: {rel_err_cross:.2e}"
     )
-    
+
     print(f"  ✓ Both grids produce consistent waveforms")
     print(f"  ✓ Adaptive grid is {100 - efficiency_adaptive:.1f}% more efficient")
-    print(f"  ✓ Execution time - Adaptive: {time_adaptive:.4f}s, Uniform: {time_uniform:.4f}s")
+    print(
+        f"  ✓ Execution time - Adaptive: {time_adaptive:.4f}s, Uniform: {time_uniform:.4f}s"
+    )

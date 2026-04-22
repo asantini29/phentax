@@ -13,7 +13,6 @@ Contains helper functions for mass ratios, spins, unit conversions,
 and spin-weighted spherical harmonics, all implemented in pure JAX.
 """
 
-
 import jax
 import jax.numpy as jnp
 from jax import lax
@@ -21,9 +20,24 @@ from jaxtyping import Array
 
 from .constants import C_SI, MPC_TO_M, MTSUN_SI
 
-# =============================================================================
-# Mass ratio utilities
-# =============================================================================
+
+def to_batch(x: float, n: int) -> Array:
+    """
+    Broadcast a scalar to a batch of size n.
+
+    Parameters
+    ----------
+    x : float
+        Scalar value to broadcast.
+    n : int
+        Batch size.
+
+    Returns
+    -------
+    Array
+        Batched array of size n.
+    """
+    return jnp.broadcast_to(jnp.atleast_1d(jnp.asarray(x)), (n,))
 
 
 @jax.jit
