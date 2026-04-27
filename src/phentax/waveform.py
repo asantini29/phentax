@@ -29,6 +29,8 @@ from phentax.core import (
 )
 from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.coarse_graining import (
+    DEFAULT_SCALE_FACTOR,
+    MINIMUM_SCALE_FACTOR,
     estimate_adaptive_steps_from_T,
     generate_adaptive_grid,
     generate_uniform_grid,
@@ -70,6 +72,9 @@ class IMRPhenomTHM:
         Relative tolerance for the t(f) root finding.
     T : float | None, default None
         Total observation time in seconds. If None, it will be set to 3 months.
+    coarse_graining_scale_factor : float, default DEFAULT_SCALE_FACTOR
+        Scale factor for the adaptive time step formula. It regulates how many points are placed per cycle. Larger values lead to denser time grids.
+        Must be >= MINIMUM_SCALE_FACTOR.
     """
 
     def __init__(
@@ -81,6 +86,7 @@ class IMRPhenomTHM:
         atol: float = 1e-12,
         rtol: float = 1e-12,
         T: float | None = None,
+        coarse_graining_scale_factor: float = DEFAULT_SCALE_FACTOR,
         # todo add time options. return interpolant / dense array / sparse array
     ):
         if higher_modes is None:
@@ -125,6 +131,15 @@ class IMRPhenomTHM:
 
         self.coarse_grain = coarse_grain
         logger.debug("Coarse graining set to %s", self.coarse_grain)
+
+        if coarse_graining_scale_factor < MINIMUM_SCALE_FACTOR:
+            raise ValueError(
+                f"coarse_graining_scale_factor must be >= {MINIMUM_SCALE_FACTOR} to prevent under-sampling."
+            )
+        self.coarse_graining_scale_factor = coarse_graining_scale_factor
+        logger.debug(
+            "Coarse graining scale factor set to %f", self.coarse_graining_scale_factor
+        )
 
         if t_low_fit:
             logger.debug("Using fit in t(f): t_low = - 0.015 * f^(-2.7)")
@@ -1245,6 +1260,7 @@ class IMRPhenomTHM:
                 wf_params.Mt_end,
                 wf_params.Mdelta_t,
                 max_steps=self.max_adaptive_steps,
+                scale_factor=self.coarse_graining_scale_factor,
             )
 
         else:
@@ -1395,7 +1411,9 @@ class IMRPhenomTHM:
         if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
             # compute this even without coarse graining to allow users to
             # extract the adaptive grid size for their own use.
-            new_max = estimate_adaptive_steps_from_T(T, delta_t)
+            new_max = estimate_adaptive_steps_from_T(
+                T, delta_t, self.coarse_graining_scale_factor
+            )
             if self.max_adaptive_steps is None or new_max > self.max_adaptive_steps:
                 self.max_adaptive_steps = new_max
                 logger.debug(
@@ -1433,6 +1451,7 @@ class IMRPhenomTHM:
             self.wf_params.Mt_end,
             self.wf_params.Mdelta_t,
             max_steps=self.max_adaptive_steps,
+            scale_factor=self.coarse_graining_scale_factor,
         )
 
         times_sec = mass_to_second(times_intrinsic, self.wf_params.total_mass)
