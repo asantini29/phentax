@@ -1378,7 +1378,7 @@ class IMRPhenomTHM_TF:
             ) #Shape (num_sources, num_modes,1)
         
         K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
-        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
         # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
         
 
@@ -1750,7 +1750,7 @@ class IMRPhenomTHM_TF:
             ) #Shape (num_sources, num_modes,1)
         
         K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
-        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
         # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
         
 
@@ -2110,7 +2110,7 @@ class IMRPhenomTHM_TF:
             ) #Shape (num_sources, num_modes,1)
         
         K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
-        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
         # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
         
 
@@ -2385,19 +2385,6 @@ class IMRPhenomTHM_TF:
         def scan_step(_, scan_inputs):
             t_0, t_1, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices = scan_inputs
 
-            # h_prefactor = (
-            #     Amps[:, :, jnp.newaxis]
-            #     * jnp.exp(1j * Phases[:, :, jnp.newaxis])
-            #     / jnp.sqrt(2 * f_dot[:, :, jnp.newaxis])
-            #     * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
-            #     * jnp.exp(
-            #         -1j
-            #         * jnp.pi
-            #         * ((f_0[:, :, jnp.newaxis] - frequencies) ** 2)
-            #         / f_dot[:, :, jnp.newaxis]
-            #     )
-            # )
-
             h_prefactor = (
                 Amps[:, :, jnp.newaxis]
                 * jnp.exp(1j * Phases[:, :, jnp.newaxis])
@@ -2557,16 +2544,9 @@ class IMRPhenomTHM_TF:
             ) #Shape (num_sources, num_modes,1)
         
         K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
-        K_cross_lms = 1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj()
+        K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
         # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
-        
-
-        # total_fresnel_waveforms_h_plus = jnp.einsum('ni,ijk->jk',K_plus_lms,tf_grid)
-        # total_fresnel_waveforms_h_cross = jnp.einsum('ni,ijk->jk',K_cross_lms,tf_grid)
-
-        # h_plus_rotated, h_cross_rotated = imr.rotate_by_polarization_angle(total_fresnel_waveforms_h_plus, total_fresnel_waveforms_h_cross, psi)
-
-
+    
         def place_waveform_at_time(waveform_modes, indices_modes,K_plus, K_cross):
             """
             Place waveforms from all modes into the frequency grid for a single time step.
