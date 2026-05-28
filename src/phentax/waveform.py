@@ -215,7 +215,7 @@ class IMRPhenomTHM:
     @property
     def modes_list(self) -> Array:
         """
-        Array of all modes included in the waveform, encoded as integers tuples (l,m). The positive m modes are listed first, followed by the negative m modes if included.
+        List of all modes included in the waveform, encoded as integers tuples (l,m). The positive m modes are listed first, followed by the negative m modes if included.
         """
         modes_list = [mode_to_lm(mode) for mode in self.positive_m_modes]
 
