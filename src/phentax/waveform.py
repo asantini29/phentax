@@ -470,7 +470,7 @@ class IMRPhenomTHM:
         T: float | None = None,
     ) -> tuple[WaveformParams, Array, Array, Array, Array]:
         """
-        Generate amplitude and phase for all modes for a batch of binaries or a single input.
+        Generate amplitude and phase for all the :math:`m \\ge 0` modes for a batch of binaries or a single input.
 
         Parameters
         ----------
@@ -502,6 +502,7 @@ class IMRPhenomTHM:
             Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If set, it overrides the default value.
+
         Returns
         -------
         wf_params : WaveformParams
@@ -511,9 +512,9 @@ class IMRPhenomTHM:
         mask : Array
             Boolean mask indicating valid time points.
         amplitudes : Array
-            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Amplitude arrays for all the :math:`m \\ge 0` modes, shape (Nbinaries, Nmodes, Ntimes).
         phases : Array
-            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Phase arrays for all the :math:`m \\ge 0` modes, shape (Nbinaries, Nmodes, Ntimes).
         """
 
         wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
@@ -541,6 +542,8 @@ class IMRPhenomTHM:
             amplitude_coeffs_22,
             phase_coeffs_22,
         )  # shape (Nbinaries, Nmodes, Ntimes)
+
+        times = mass_to_second(times, wf_params.total_mass)
 
         return wf_params, times, mask, amplitudes, phases
 
@@ -632,8 +635,6 @@ class IMRPhenomTHM:
         if self.include_negative_modes:
             h_lmms = (-1) ** self.negative_ls[None, :, None] * jnp.conj(h_lms)
             h_lms = jnp.concatenate([h_lms, h_lmms], axis=1)
-
-        times = mass_to_second(times, wf_params.total_mass)
 
         return times, mask, h_lms
 
