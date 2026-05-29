@@ -748,8 +748,8 @@ class IMRPhenomTHM:
             Time array in seconds.
         mask : Array
             Boolean mask indicating valid time points.
-        h_lms : Array
-            Complex strain arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        strain_components : Array
+            Complex strain arrays for all modes multiplied by spin-weighted spherical harmonics, shape (Nbinaries, Nmodes, Ntimes).
         """
         times, mask, h_lms = self.compute_hlms(
             m1,
@@ -846,9 +846,9 @@ class IMRPhenomTHM:
         mask : Array
             Boolean mask indicating valid time points.
         amplitudes : Array
-            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Amplitude of the strain components for all modes, shape (Nbinaries, Nmodes, Ntimes).
         phases : Array
-            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Phase of the strain components for all modes, shape (Nbinaries, Nmodes, Ntimes).
         """
         times, mask, strain_components = self.compute_strain_components(
             m1,
