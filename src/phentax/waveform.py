@@ -38,7 +38,12 @@ from phentax.utils.coarse_graining import (
 )
 from phentax.utils.config import setup_logging
 from phentax.utils.constants import YRSID_SI
-from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm
+from phentax.utils.utility import (
+    check_equal_bhs,
+    mass_to_second,
+    mode_to_int,
+    mode_to_lm,
+)
 from phentax.utils.ylm import (
     spin_weighted_spherical_harmonic,
     spin_weighted_spherical_harmonic_all_modes,
@@ -199,6 +204,54 @@ class IMRPhenomTHM:
             return num_positive_modes + num_negative_modes
         else:
             return num_positive_modes
+
+    @property
+    def positive_m_modes(self) -> Array:
+        """
+        Array of positive m modes included in the waveform, including the (2,2) mode.
+        """
+        return jnp.concatenate([jnp.array([22]), self.higher_modes])
+
+    @property
+    def modes_list(self) -> Array:
+        """
+        Array of all modes included in the waveform, encoded as integers tuples (l,m). The positive m modes are listed first, followed by the negative m modes if included.
+        """
+        modes_list = [mode_to_lm(mode) for mode in self.positive_m_modes]
+
+        if self.include_negative_modes:
+            negative_ms = -self.mms[self.mms != 0]
+            modes_list.extend([(l, m) for l, m in zip(self.negative_ls, negative_ms)])
+
+        return jnp.array(modes_list)
+
+    def get_mode_index(self, mode: int | tuple) -> int:
+        """
+        Find which entry in the mode list corresponds to a given mode (l,m) or lm. This is useful to extract the amplitude and phase of a specific mode from the output arrays.
+
+        Parameters
+        ----------
+        mode : int | tuple
+            The mode to find, either as an integer lm (e.g., 22 for (2,2)) or as a tuple (l,m) (e.g., (2,2)). If looking for a negative m mode, the input should be the tuple (l,m).
+
+        Returns
+        -------
+        int
+            The index of the mode in the output arrays.
+        """
+
+        if isinstance(mode, int):
+            mode_lm = mode_to_lm(mode)
+        elif isinstance(mode, tuple) and len(mode) == 2:
+            mode_lm = mode
+        else:
+            raise ValueError("Mode must be an integer lm or a tuple (l,m).")
+
+        for idx, (l, m) in enumerate(self.modes_list):
+            if (l, m) == mode_lm:
+                return idx
+
+        raise ValueError(f"Mode {mode} not found in the included modes.")
 
     @jax.jit(static_argnames="self")
     def _compute_coeffs_22(
@@ -470,7 +523,7 @@ class IMRPhenomTHM:
         T: float | None = None,
     ) -> tuple[WaveformParams, Array, Array, Array, Array]:
         """
-        Generate amplitude and phase for all modes for a batch of binaries or a single input.
+        Generate amplitude and phase for all the :math:`m \\ge 0` modes for a batch of binaries or a single input.
 
         Parameters
         ----------
@@ -502,6 +555,7 @@ class IMRPhenomTHM:
             Reference frequency in Hz. Used if t_ref is NaN to set the reference time for waveform generation.
         T : float | None, default None
             Total observation time in seconds. If set, it overrides the default value.
+
         Returns
         -------
         wf_params : WaveformParams
@@ -511,9 +565,9 @@ class IMRPhenomTHM:
         mask : Array
             Boolean mask indicating valid time points.
         amplitudes : Array
-            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Amplitude arrays for all the :math:`m \\ge 0` modes, shape (Nbinaries, Nmodes, Ntimes).
         phases : Array
-            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Phase arrays for all the :math:`m \\ge 0` modes, shape (Nbinaries, Nmodes, Ntimes).
         """
 
         wf_params, times, mask, amplitude_coeffs_22, phase_coeffs_22 = (
@@ -541,6 +595,8 @@ class IMRPhenomTHM:
             amplitude_coeffs_22,
             phase_coeffs_22,
         )  # shape (Nbinaries, Nmodes, Ntimes)
+
+        times = mass_to_second(times, wf_params.total_mass)
 
         return wf_params, times, mask, amplitudes, phases
 
@@ -633,8 +689,6 @@ class IMRPhenomTHM:
             h_lmms = (-1) ** self.negative_ls[None, :, None] * jnp.conj(h_lms)
             h_lms = jnp.concatenate([h_lms, h_lmms], axis=1)
 
-        times = mass_to_second(times, wf_params.total_mass)
-
         return times, mask, h_lms
 
     def compute_strain_components(
@@ -694,8 +748,8 @@ class IMRPhenomTHM:
             Time array in seconds.
         mask : Array
             Boolean mask indicating valid time points.
-        h_lms : Array
-            Complex strain arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+        strain_components : Array
+            Complex strain arrays for all modes multiplied by spin-weighted spherical harmonics, shape (Nbinaries, Nmodes, Ntimes).
         """
         times, mask, h_lms = self.compute_hlms(
             m1,
@@ -792,9 +846,9 @@ class IMRPhenomTHM:
         mask : Array
             Boolean mask indicating valid time points.
         amplitudes : Array
-            Amplitude arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Amplitude of the strain components for all modes, shape (Nbinaries, Nmodes, Ntimes).
         phases : Array
-            Phase arrays for all modes, shape (Nbinaries, Nmodes, Ntimes).
+            Phase of the strain components for all modes, shape (Nbinaries, Nmodes, Ntimes).
         """
         times, mask, strain_components = self.compute_strain_components(
             m1,
