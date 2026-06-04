@@ -54,6 +54,31 @@ logger = setup_logging(__name__)
 ALLOWED_POSITIVE_HMS = [21, 33, 44, 55]
 
 
+def _is_tracing(x) -> bool:
+    """Return True if *x* is a JAX abstract tracer (i.e. we are inside jax.jit / jax.grad).
+
+    Uses only the public JAX error API.  A concrete array can be converted to a
+    Python float; an abstract tracer raises ``TracerArrayConversionError`` or
+    ``ConcretizationTypeError`` when that conversion is attempted.
+
+    Parameters
+    ----------
+    x : array-like
+        Value to inspect (typically a JAX array or Python scalar).
+
+    Returns
+    -------
+    bool
+        ``True`` when *x* is being traced (abstract); ``False`` when it is a
+        concrete value.
+    """
+    try:
+        float(jnp.atleast_1d(x).reshape(-1)[0])
+        return False
+    except (jax.errors.TracerArrayConversionError, jax.errors.ConcretizationTypeError):
+        return True
+
+
 class IMRPhenomTHM:
     """
     Class for generating multi-polar, aligned-spin IMRPhenomTHM waveforms.
@@ -1403,7 +1428,7 @@ class IMRPhenomTHM:
         ), "Spin must be between -1 and 1"
         """
         # Fix
-        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+        if not _is_tracing(chi1z):
             assert jnp.all(
                 jnp.abs(jnp.atleast_1d(chi1z)) <= 1
             ), "Spin must be between -1 and 1"
@@ -1462,7 +1487,7 @@ class IMRPhenomTHM:
         # JIT tracing — only on concrete calls.  Without this guard, the function
         # runs inside jax.jit, jnp.asarray(python_float) produces an abstract
         # tracer, and int(jnp.ceil(tracer)) raises ConcretizationTypeError.
-        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+        if not _is_tracing(chi1z):
             # compute this even without coarse graining to allow users to
             # extract the adaptive grid size for their own use.
             new_max = estimate_adaptive_steps_from_T(
