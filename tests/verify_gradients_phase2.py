@@ -274,6 +274,7 @@ def verify_grad_through_methods():
             inf=bool(jnp.isinf(g)),
         )
     except Exception as e:
+        global _fail_count
         _fail_count += 1
         print(
             f"FAIL: GRAD-04[compute_hlms]  exception={type(e).__name__}: {str(e)[:80]}"
@@ -306,6 +307,7 @@ def verify_grad_through_methods():
             inf=bool(jnp.isinf(g)),
         )
     except Exception as e:
+        global _fail_count
         _fail_count += 1
         print(
             f"FAIL: GRAD-05[compute_strain_components]  exception={type(e).__name__}: {str(e)[:80]}"
@@ -371,6 +373,7 @@ def verify_vmap_grad():
             inf=has_inf,
         )
     except Exception as e:
+        global _fail_count
         _fail_count += 1
         print(f"FAIL: GRAD-06[vmap+grad]  exception={type(e).__name__}: {str(e)[:80]}")
 
@@ -381,6 +384,7 @@ def verify_vmap_grad():
 
 
 def verify_warn01_chi_finiteness():
+    global _fail_count
     print()
     print("=== verify_warn01_chi_finiteness (WARN-01) ===")
     print("  (finiteness only — correctness deferred to Phase 3 (TEST-01))")
