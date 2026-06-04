@@ -210,6 +210,7 @@ def verify_jacfwd_polarizations():
 
 
 def verify_grad_through_methods():
+    global _fail_count
     print()
     print("=== verify_grad_through_methods (GRAD-03, GRAD-04, GRAD-05) ===")
     model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
@@ -274,7 +275,6 @@ def verify_grad_through_methods():
             inf=bool(jnp.isinf(g)),
         )
     except Exception as e:
-        global _fail_count
         _fail_count += 1
         print(
             f"FAIL: GRAD-04[compute_hlms]  exception={type(e).__name__}: {str(e)[:80]}"
@@ -307,7 +307,6 @@ def verify_grad_through_methods():
             inf=bool(jnp.isinf(g)),
         )
     except Exception as e:
-        global _fail_count
         _fail_count += 1
         print(
             f"FAIL: GRAD-05[compute_strain_components]  exception={type(e).__name__}: {str(e)[:80]}"
@@ -320,6 +319,7 @@ def verify_grad_through_methods():
 
 
 def verify_vmap_grad():
+    global _fail_count
     print()
     print("=== verify_vmap_grad (GRAD-06) ===")
     model = IMRPhenomTHM(higher_modes=None, include_negative_modes=False)
@@ -373,7 +373,6 @@ def verify_vmap_grad():
             inf=has_inf,
         )
     except Exception as e:
-        global _fail_count
         _fail_count += 1
         print(f"FAIL: GRAD-06[vmap+grad]  exception={type(e).__name__}: {str(e)[:80]}")
 
