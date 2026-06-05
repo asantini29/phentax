@@ -130,6 +130,10 @@ def _get_mid_idx(model, params):
     )
     true_idx = jnp.where(mask[0])[0]
     n = len(true_idx)
+    assert n > 0, (
+        f"_get_mid_idx: mask[0] is all-False — no valid time points found. "
+        f"Check that T, f_min, and mass parameters produce a non-empty waveform."
+    )
     return int(true_idx[n // 2])
 
 

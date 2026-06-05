@@ -68,6 +68,10 @@ def _get_mid_idx(model):
     )
     true_idx = jnp.where(mask[0])[0]
     n = len(true_idx)
+    assert n > 0, (
+        "_get_mid_idx: mask[0] is all-False — no valid time points found. "
+        "Check that T_SPIN, F_MIN_SPIN, and mass parameters produce a non-empty waveform."
+    )
     return int(true_idx[n // 2])  # midpoint of valid region — static Python int
 
 
