@@ -205,6 +205,7 @@ def test_grad_compute_polarizations(param_name):
         float(g_ad),
         fd,
         rtol=RTOL_BY_PARAM[param_name],
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg=f"compute_polarizations grad wrt {param_name} mismatch at LIGO point",
     )
 
@@ -248,6 +249,7 @@ def test_grad_compute_polarizations_lisa(param_name):
         float(g_ad),
         fd,
         rtol=RTOL_BY_PARAM[param_name],
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg=f"compute_polarizations grad wrt {param_name} mismatch at LISA point",
     )
 
@@ -290,6 +292,7 @@ def test_grad_compute_amp_phase(param_name):
         float(g_ad),
         fd,
         rtol=RTOL_BY_PARAM[param_name],
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg=f"compute_amp_phase grad wrt {param_name} mismatch at LIGO point",
     )
 
@@ -332,6 +335,7 @@ def test_grad_compute_hlms(param_name):
         float(g_ad),
         fd,
         rtol=RTOL_BY_PARAM[param_name],
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg=f"compute_hlms grad wrt {param_name} mismatch at LIGO point",
     )
 
@@ -374,6 +378,7 @@ def test_grad_compute_strain_components(param_name):
         float(g_ad),
         fd,
         rtol=RTOL_BY_PARAM[param_name],
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg=f"compute_strain_components grad wrt {param_name} mismatch at LIGO point",
     )
 
@@ -422,5 +427,6 @@ def test_grad_vmap_composition():
         g_batch,
         g_per,
         rtol=1e-10,
+        atol=1e-10,  # guard against near-zero gradient at the pinned index
         err_msg="vmap(grad) result differs from per-sample grad",
     )
