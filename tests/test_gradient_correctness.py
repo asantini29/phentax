@@ -144,12 +144,23 @@ def _step_for(x):
     """Parameter-appropriate finite-difference step using a relative formula.
 
     Uses h = 1e-5 * max(|x|, 1.0), following the CONTEXT.md recommendation
-    (h = 1e-5 * max(|x|, 1e-3)). This is scale-appropriate across both LIGO
-    (m1~30) and LISA (m1~1e6) regimes: fixed steps (e.g. 0.3 M_sun) are too
-    coarse for oscillating reductions (h_plus, h_lm.real) at the LIGO point,
-    and too small (relative) for LISA mass scales.
+    (h = 1e-5 * max(|x|, 1e-3)). This is scale-appropriate for LIGO-like
+    regimes (m1~30): fixed steps (e.g. 0.3 M_sun) are too coarse for
+    oscillating reductions (h_plus, h_lm.real) at the LIGO point.
     """
     return 1e-5 * max(abs(float(x)), 1.0)
+
+
+def _step_for_lisa(x):
+    """LISA-specific finite-difference step using a finer relative formula.
+
+    Uses h = 1e-6 * max(|x|, 1.0) — one decade smaller than _step_for.
+    At LISA mass scales (m1~1e6) the waveform function varies more steeply
+    relative to the parameter, so a finer step is required to keep the FD
+    estimate in the asymptotic regime where truncation error < AD–FD agreement
+    tolerance (rtol=1e-4 for m1).
+    """
+    return 1e-6 * max(abs(float(x)), 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +242,7 @@ def test_grad_compute_polarizations_lisa(param_name):
     g_ad = jax.grad(fn)(LISA_PARAMS[param_name])
     assert jnp.isfinite(g_ad), f"gradient wrt {param_name} is not finite: {g_ad}"
 
-    h_step = _step_for(LISA_PARAMS[param_name])
+    h_step = _step_for_lisa(LISA_PARAMS[param_name])
     fd = _central_fd(fn, LISA_PARAMS[param_name], h_step)
     np.testing.assert_allclose(
         float(g_ad),
