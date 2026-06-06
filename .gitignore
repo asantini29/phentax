@@ -14,4 +14,4 @@ docs/_build
 docs/_autosummary
 
 # claude
-.planning/
+.planning*
