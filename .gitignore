@@ -8,5 +8,10 @@ wheels/
 
 # Virtual environments
 .venv*
+
+# docs build files
 docs/_build
 docs/_autosummary
+
+# claude
+.planning/
