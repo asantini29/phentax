@@ -198,8 +198,24 @@ def _compute_waveform_params(
 
     Mdelta_t = second_to_mass(delta_t, total_mass)
 
-    Mt_ref = second_to_mass(t_ref, total_mass) if t_ref is not None else jnp.nan
-    Mt_min = second_to_mass(t_min, total_mass) if t_min is not None else jnp.nan
+    # D-06: safe-numerator + re-injected NaN sentinel pattern.
+    # When t_ref/t_min are the jnp.nan default sentinel, the old code computed
+    # nan/M_sec which is an m-dependent NaN — jax.grad traces through M_sec and
+    # returns NaN for all mass-parameter gradients (BLOCKER-01).
+    # Fix: substitute 0.0 in the numerator when unset (gradient = 0, finite),
+    # then re-inject a bare NaN constant so jnp.isnan(Mt_ref) stays True and
+    # the downstream lax.cond bisection branch is selected unchanged.
+    is_unset_ref = jnp.isnan(jnp.asarray(t_ref))
+    Mt_ref_real = second_to_mass(
+        jnp.where(is_unset_ref, jnp.asarray(0.0), jnp.asarray(t_ref)), total_mass
+    )
+    Mt_ref = jnp.where(is_unset_ref, jnp.nan, Mt_ref_real)
+
+    is_unset_min = jnp.isnan(jnp.asarray(t_min))
+    Mt_min_real = second_to_mass(
+        jnp.where(is_unset_min, jnp.asarray(0.0), jnp.asarray(t_min)), total_mass
+    )
+    Mt_min = jnp.where(is_unset_min, jnp.nan, Mt_min_real)
 
     # Amplitude prefactor: M / D
     # Convert distance from Mpc to meters

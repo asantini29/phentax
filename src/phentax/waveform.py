@@ -40,8 +40,8 @@ from phentax.utils.config import setup_logging
 from phentax.utils.constants import YRSID_SI
 from phentax.utils.utility import (
     check_equal_bhs,
+    is_tracing,
     mass_to_second,
-    mode_to_int,
     mode_to_lm,
 )
 from phentax.utils.ylm import (
@@ -1403,7 +1403,7 @@ class IMRPhenomTHM:
         ), "Spin must be between -1 and 1"
         """
         # Fix
-        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+        if not is_tracing(chi1z):
             assert jnp.all(
                 jnp.abs(jnp.atleast_1d(chi1z)) <= 1
             ), "Spin must be between -1 and 1"
@@ -1462,7 +1462,7 @@ class IMRPhenomTHM:
         # JIT tracing — only on concrete calls.  Without this guard, the function
         # runs inside jax.jit, jnp.asarray(python_float) produces an abstract
         # tracer, and int(jnp.ceil(tracer)) raises ConcretizationTypeError.
-        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+        if not is_tracing(chi1z):
             # compute this even without coarse graining to allow users to
             # extract the adaptive grid size for their own use.
             new_max = estimate_adaptive_steps_from_T(
