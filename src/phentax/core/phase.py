@@ -416,12 +416,12 @@ def compute_phase_coeffs_22(
 
     def _compute_min(_):
         return get_time_of_frequency(
-            wf_params.Mf_min,
-            wf_params.eta,
-            PhaseCoeffs22,
-            wf_params.t_low,
-            wf_params.atol,
-            wf_params.rtol,
+            freq=wf_params.Mf_min,
+            eta=wf_params.eta,
+            phase_coeffs=PhaseCoeffs22,
+            t_low=wf_params.t_low,
+            atol=wf_params.atol,
+            rtol=wf_params.rtol,
         )
 
     def _use_existing_min(_):
@@ -451,12 +451,12 @@ def compute_phase_coeffs_22(
 
     def _compute_ref(_):
         return get_time_of_frequency(
-            wf_params.Mf_ref,
-            wf_params.eta,
-            PhaseCoeffs22,
-            wf_params.t_low,
-            wf_params.atol,
-            wf_params.rtol,
+            freq=wf_params.Mf_ref,
+            eta=wf_params.eta,
+            phase_coeffs=PhaseCoeffs22,
+            t_low=wf_params.t_low,
+            atol=wf_params.atol,
+            rtol=wf_params.rtol,
         )
 
     def _use_existing_ref(_):
