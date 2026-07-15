@@ -1411,21 +1411,26 @@ class IMRPhenomTHM:
                 jnp.abs(jnp.atleast_1d(chi2z)) <= 1
             ), "Spin must be between -1 and 1"
 
-        if jnp.isnan(t_min).any():
-            if jnp.isnan(f_min).any():
-                raise ValueError(
-                    "If t_min is NaN, f_min must be set to a finite value."
-                )
-            else:
-                logger.debug("Setting t_min based on f_min")
+        # Fourth fix: same Tracer guard as above -- these branches only
+        # raise/log, they never assign into wf_params, so skipping them
+        # under tracing (jit/vmap) is safe and matches the precedent set
+        # for the spin and adaptive-grid checks elsewhere in this function.
+        if not isinstance(jnp.atleast_1d(chi1z), jax.core.Tracer):
+            if jnp.isnan(t_min).any():
+                if jnp.isnan(f_min).any():
+                    raise ValueError(
+                        "If t_min is NaN, f_min must be set to a finite value."
+                    )
+                else:
+                    logger.debug("Setting t_min based on f_min")
 
-        if jnp.isnan(t_ref).any():
-            if jnp.isnan(f_ref).any():
-                raise ValueError(
-                    "If t_ref is NaN, f_ref must be set to a finite value."
-                )
-            else:
-                logger.debug("Setting t_ref based on f_ref")
+            if jnp.isnan(t_ref).any():
+                if jnp.isnan(f_ref).any():
+                    raise ValueError(
+                        "If t_ref is NaN, f_ref must be set to a finite value."
+                    )
+                else:
+                    logger.debug("Setting t_ref based on f_ref")
 
         wf_params = self._process_parameters(
             m1,
