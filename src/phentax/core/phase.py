@@ -921,7 +921,12 @@ def get_time_of_frequency(
 
     t_low = jax.lax.cond(
         t_low == 0,
-        lambda: -0.015 * freq ** (-2.7),  # enlarging this a bit
+        # The time-frequency evolution in the Newtonian approximation changes with the chirp mass; t is
+        # proportional to M_c^(-5/3). M_c = eta^(3/5) * M, with M = m1 + m2. If we divide by eta, which
+        # is <= 1/4 by the AM-GM inequality, we get a lower t_low (since there's a negative coefficient).
+        # This can plausibly fail in certain cases when M < 1 in whatever units you use, but in most cases
+        # we will get a number low enough. You can always make the abs. value of the coefficient larger.
+        lambda: -0.015 * freq ** (-8/3) / eta,  # enlarging this a bit
         lambda: t_low,
     )
 
