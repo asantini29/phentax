@@ -2634,7 +2634,7 @@ class IMRPhenomTHM_TF:
                                                 channels = channels)
 
 
-    @jax.jit(static_argnums=[0,1,15,16,17,18])
+    # @jax.jit(static_argnums=[0,1,2,13,14,15,16,17])
     def get_tf_fresnel_tukey_midpoint_response(self,
                                     time_grid: Array,
                                     frequency_grid: Array,
@@ -2644,18 +2644,15 @@ class IMRPhenomTHM_TF:
                                     chi2z: float | Array,
                                     distance: float | Array,
                                     phi_ref: float | Array,
-                                    f_ref: float | Array,
-                                    f_min: float | Array,
                                     inclination: float | Array,
                                     psi: float | Array,
                                     latitude: float | Array,
                                     longitude: float | Array,
                                     delta_t: float = 15.0,
-                                    t_min: float = jnp.nan,
-                                    t_ref: float = jnp.nan,
                                     closest_f_bins: int = 10,
                                     tukey_alpha: float = 0.5,
-                                    time_of_projections : float | Array = 0.0,
+                                    time_of_projections : float  = 0.0,
+                                    time_of_mergers: float | Array = 0.0,
                                 ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
     
             """
@@ -2666,13 +2663,21 @@ class IMRPhenomTHM_TF:
             Everything aligning at merger. 
             """
 
-            # TEMPORARY BODGE: Response ltt_t0 used as the 0 for the response. 
-            # response_t0 = self.response_object.ltt_t0 # This is the time of the first posible response sample, in seconds.
+            # Negative, seconds units, longest time for the waveforms to start from.
+            #  NOTE: Should merge main developments which would allow for t_min per source with less wasted computation. 
+            
+            # Note jnp.max(time_of_mergers) > time_of_projections, so t_min is negative.
+            t_min = time_of_projections-jnp.max(time_of_mergers) 
+
+            # print('t_mins: ',t_min)
     
+            # t_ref internally set to 0, as we are aligning everything at merger, externally at least. 
+            t_ref = 0 
+
+            # print('t_ref: ',t_ref)
+
             num_sources = jnp.atleast_1d(m1).shape[0]
     
-            # print("Number of sources: ", num_sources)
-            # Ignore times for now 
             wf_params, amplitude_coeffs_22, phase_coeffs_22 = (
                         self.initial_processing_TF(
                             m1,
@@ -2681,8 +2686,8 @@ class IMRPhenomTHM_TF:
                             chi2z,
                             distance,
                             phi_ref,
-                            f_ref,
-                            f_min,
+                            1.e-4,#f_ref (both frequencies are dummy and redundant since both t_ref and t_min are supplied)
+                            1.e-4,#f_min
                             inclination,
                             psi,# polarization 
                             delta_t,
@@ -2690,26 +2695,33 @@ class IMRPhenomTHM_TF:
                             t_ref,
                         )
                     )
-                
-            # This is the minimum time for every waveform in the batch in mass units 
-            min_time_M_units = wf_params.Mt_min 
     
-            #Convert every single min time to physical units (seconds) to see what is the longest waveform in absolute (real) time
-            time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
-    
-            # print('All time min physical (s):',time_min_physical_all)
-    
-            # Pad to smallest min time (real units) to ensure all waveforms fit in the time grid
-            min_time_s_units = jnp.min(time_min_physical_all)
-    
-            # shift time grid to be negative, limited by the length of the longest waveform. (Physical units, seconds)
-            time_grid += min_time_s_units
-        
-    
-            t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])  # Midpoints between time grid edges, shape (n_times - 1,)
-            
-            t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(t_grid_midpoints, wf_params.total_mass)
-            midpoint_mask = jnp.ones_like(t_grid_midpoints, dtype=bool)  
+            # Midpoints of the (observation-frame) time grid, shape (n_times - 1,). Never shifted.
+            t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:]) # POSITIVE
+
+            # Per-source merger-frame midpoints: tau_i = t - tc_i (negative *before source i's merger*).
+            # Each source is evaluated at its own time-to-merger, so per-source merger times are
+            # honoured.
+
+            # time_grid and time_of_mergers are on the same absolute observation clock (grid starts
+            # at time_of_projections), so the epoch cancels here; it only enters via t_min above.
+
+            t_mid_merger = (
+                t_grid_midpoints[None, :] - jnp.atleast_1d(time_of_mergers)[:, None]
+            )  # (num_sources, n_mid), seconds, negative pre-merger
+            # print('t_mid_merger: ',t_mid_merger)
+
+            # Convert to mass units per source for the amp/phase and f,fdot evaluations.
+            t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(0, 0))(
+                t_mid_merger, wf_params.total_mass
+            )
+
+            # Segment is valid for source i only while its midpoint is pre-merger (or pre-cut).
+            # tau_cut = 0.0 keeps segments whose midpoint is pre-merger.
+            tau_cut = 0.0
+            valid_all = (t_mid_merger < tau_cut).T      # (n_mid, num_sources) — time axis leading, like the scan inputs
+
+            midpoint_mask = jnp.ones_like(t_grid_midpoints, dtype=bool)
             
             # Compute amplitudes and phases at midpoints of each tranche for each binary
             amplitudes, phases = jax.vmap(self._compute_all_modes, in_axes = (0, None, 0, 0, 0))(
@@ -2747,27 +2759,21 @@ class IMRPhenomTHM_TF:
             # # For each source find the time at which to begin the waveform. (Is this handled inside the waveform parameter computation? i have no idea)
             # t_min_index = jnp.nonzero(jnp.abs(amplitudes[:,0,:]),axis=1)
     
-            # Back to sensible and positive time grid
-            time_grid -= min_time_s_units
-            t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])
-            
             # Frequency grid spacing (assumed uniform)
             dF = frequency_grid[1] - frequency_grid[0]
     
             # Build per-step inputs and scan over time tranches to keep the loop JAX-native.
             t0_all = time_grid[:-1] # Beginning times for all the tranches (Physical units, seconds)
             t1_all = time_grid[1:] # Ending times for all the tranches (Physical units, seconds)
+
             t_indices = jnp.arange(t0_all.shape[0]) # Indices for time tranches
 
             tmid_all = t_grid_midpoints # Midpoint times for all the tranches (Physical units, seconds)
     
     
-            # Convert midpoints to mass units for computations of f,fdot 
-            tmid_mass_all = jax.vmap(
-                lambda t_mid: jax.vmap(second_to_mass, in_axes=(None, 0))(
-                    t_mid + min_time_s_units, wf_params.total_mass # Need the shift here in t_mid as remember t_mid in seconds starts at 0 
-                )
-            )(tmid_all)
+            # Per-source merger-frame midpoints in mass units, arranged (n_mid, num_sources)
+            # for the per-tranche scan below. Same evaluation times as the amp/phase above.
+            tmid_mass_all = t_grid_midpoints_mass_units.T
     
             # Transpose amplitudes and phases to shape (num_times, num_sources, num_modes) for scanning over time tranches.
             amps_all = amplitudes.transpose(2, 0, 1)    
@@ -2779,7 +2785,7 @@ class IMRPhenomTHM_TF:
                     lambda t_mid_mass: jax.vmap(
                         lambda t, eta, pc: jax.vmap(lambda p: imr_omega(t, eta, p))(pc)
                     )(t_mid_mass, wf_params.eta, overall_phase_coeffs)
-                )(tmid_mass_all)
+                )(tmid_mass_all)# For each of t_mid (unique for each source as its tc-t, compute f_0 for each source and mode)
                 / (2 * jnp.pi)
             )# IN MASS UNITS
     
@@ -2789,10 +2795,13 @@ class IMRPhenomTHM_TF:
                     lambda t_mid_mass: jax.vmap(
                         lambda t, eta, pc: jax.vmap(lambda p: imr_omega_dot(t, eta, p))(pc)
                     )(t_mid_mass, wf_params.eta, overall_phase_coeffs)
-                )(tmid_mass_all)
+                )(tmid_mass_all)# For each of t_mid (unique for each source as its tc-t, compute fdot for each source and mode)
                 / (2 * jnp.pi)
             )# IN MASS UNITS
-    
+
+            # Sanitize BEFORE sqrt/divide: post-merger extrapolation can give f_dot <= 0, and
+            f_dot_all = jnp.where(valid_all[:, :, None], f_dot_all, 1.0)
+                
             f_0_all = jax.vmap(
                 lambda f0_t: jax.vmap(mass_to_hz, in_axes=(0, 0))(f0_t, wf_params.total_mass)
             )(f_0_all)# Convert f_0 to Hz
@@ -2978,7 +2987,6 @@ class IMRPhenomTHM_TF:
     
                 # Sum the three pieces to get the full integral with the tukey window taken into account.
                 h_overall = h_prefactor * (h_flat_roll_on + h_roll_on_positive + h_roll_on_negative + h_mid + h_roll_off_flat + h_roll_off_positive + h_roll_off_negative)
-
                 #-------- RESPONSE ---------# (messy as hell for now, I am sorry)
 
                 # One SFT segment at a time: compute the transfer functions for all sources and modes,
@@ -3067,6 +3075,11 @@ class IMRPhenomTHM_TF:
                     frequency_indices_all,
                 ),
             )
+
+            # Zero invalid (segment, source) contributions. jnp.where, not multiplication:
+            # where selects 0 even if the masked value is inf/NaN; mask * NaN would stay NaN.
+            channels_steps = jnp.where(valid_all[:, :, None, None], channels_steps, 0.0)
+
 
             waveform_storage = waveform_steps
             frequency_indices_storage = frequency_indices_steps
