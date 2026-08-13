@@ -2614,6 +2614,561 @@ class IMRPhenomTHM_TF:
         
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
+    def setup_response_class(self,
+                             orbit_path: str,
+                             STFT_times: jnp.array,
+                             modes: list = ["22", "21", "33", "44", "55"],
+                             channels: str = "AET"):
+        """
+        Setup STFT response within the waveform generator for now, hacky method, will be cleaned up later. 
+        """
+        # Import FD and STFT response code. 
+        import LISA_response
+
+        # Setting up STFT response object. 
+        # NOTE from here onwards the STFT times are fixed, all the response just takes an index. 
+        self.response_object = LISA_response.response_multi_harmonic_STFT.STFTResponse(
+                                                STFT_times = STFT_times,
+                                                filename=orbit_path,
+                                                modes = modes,
+                                                channels = channels)
+
+
+    @jax.jit(static_argnums=[0,1,15,16,17,18])
+    def get_tf_fresnel_tukey_midpoint_response(self,
+                                    time_grid: Array,
+                                    frequency_grid: Array,
+                                    m1: float | Array,
+                                    m2: float | Array,
+                                    chi1z: float | Array,
+                                    chi2z: float | Array,
+                                    distance: float | Array,
+                                    phi_ref: float | Array,
+                                    f_ref: float | Array,
+                                    f_min: float | Array,
+                                    inclination: float | Array,
+                                    psi: float | Array,
+                                    latitude: float | Array,
+                                    longitude: float | Array,
+                                    delta_t: float = 15.0,
+                                    t_min: float = jnp.nan,
+                                    t_ref: float = jnp.nan,
+                                    closest_f_bins: int = 10,
+                                    tukey_alpha: float = 0.5,
+                                    time_of_projections : float | Array = 0.0,
+                                ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
+    
+            """
+            Implementation of time-frequency Fresnel waveform generation.
+    
+            Waveforms are defined with respect to the centre of the time-segments, and the tukey correction is analytically taken into account. 
+    
+            Everything aligning at merger. 
+            """
+
+            # TEMPORARY BODGE: Response ltt_t0 used as the 0 for the response. 
+            # response_t0 = self.response_object.ltt_t0 # This is the time of the first posible response sample, in seconds.
+    
+            num_sources = jnp.atleast_1d(m1).shape[0]
+    
+            # print("Number of sources: ", num_sources)
+            # Ignore times for now 
+            wf_params, amplitude_coeffs_22, phase_coeffs_22 = (
+                        self.initial_processing_TF(
+                            m1,
+                            m2,
+                            chi1z,
+                            chi2z,
+                            distance,
+                            phi_ref,
+                            f_ref,
+                            f_min,
+                            inclination,
+                            psi,# polarization 
+                            delta_t,
+                            t_min,
+                            t_ref,
+                        )
+                    )
+                
+            # This is the minimum time for every waveform in the batch in mass units 
+            min_time_M_units = wf_params.Mt_min 
+    
+            #Convert every single min time to physical units (seconds) to see what is the longest waveform in absolute (real) time
+            time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
+    
+            # print('All time min physical (s):',time_min_physical_all)
+    
+            # Pad to smallest min time (real units) to ensure all waveforms fit in the time grid
+            min_time_s_units = jnp.min(time_min_physical_all)
+    
+            # shift time grid to be negative, limited by the length of the longest waveform. (Physical units, seconds)
+            time_grid += min_time_s_units
+        
+    
+            t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])  # Midpoints between time grid edges, shape (n_times - 1,)
+            
+            t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(t_grid_midpoints, wf_params.total_mass)
+            midpoint_mask = jnp.ones_like(t_grid_midpoints, dtype=bool)  
+            
+            # Compute amplitudes and phases at midpoints of each tranche for each binary
+            amplitudes, phases = jax.vmap(self._compute_all_modes, in_axes = (0, None, 0, 0, 0))(
+                t_grid_midpoints_mass_units,
+                midpoint_mask,
+                wf_params,
+                amplitude_coeffs_22,
+                phase_coeffs_22,
+            )
+    
+            n_modes = amplitudes.shape[1]
+    
+           
+           # Get higher order modes phase coeffs
+            phase_hm_coeffs,_ = jax.vmap(
+                lambda wp, pc22: jax.vmap(
+                    lambda mode: self._compute_phase_coeffs_hm(mode, wp, pc22)
+                )(self.higher_modes)
+            )(wf_params, phase_coeffs_22)
+    
+            # print('Phase HM coeffs:',phase_hm_coeffs)
+    
+            # Combine 22 and HM phase coeffs 
+            overall_phase_coeffs = jax.tree_util.tree_map(
+                lambda p22, phm: jnp.concatenate([p22[:, None], phm], axis=1),
+                phase_coeffs_22,
+                phase_hm_coeffs,
+            )
+            # print('Phase overall coeffs:',overall_phase_coeffs)
+    
+            # amplitudes shape: [num_sources, num_modes, num_times]
+            # amp_factor shape: [num_sources] -> need to reshape for broadcasting
+            amplitudes *= wf_params.amp_factor[:, None, None]
+    
+            # # For each source find the time at which to begin the waveform. (Is this handled inside the waveform parameter computation? i have no idea)
+            # t_min_index = jnp.nonzero(jnp.abs(amplitudes[:,0,:]),axis=1)
+    
+            # Back to sensible and positive time grid
+            time_grid -= min_time_s_units
+            t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])
+            
+            # Frequency grid spacing (assumed uniform)
+            dF = frequency_grid[1] - frequency_grid[0]
+    
+            # Build per-step inputs and scan over time tranches to keep the loop JAX-native.
+            t0_all = time_grid[:-1] # Beginning times for all the tranches (Physical units, seconds)
+            t1_all = time_grid[1:] # Ending times for all the tranches (Physical units, seconds)
+            t_indices = jnp.arange(t0_all.shape[0]) # Indices for time tranches
+
+            tmid_all = t_grid_midpoints # Midpoint times for all the tranches (Physical units, seconds)
+    
+    
+            # Convert midpoints to mass units for computations of f,fdot 
+            tmid_mass_all = jax.vmap(
+                lambda t_mid: jax.vmap(second_to_mass, in_axes=(None, 0))(
+                    t_mid + min_time_s_units, wf_params.total_mass # Need the shift here in t_mid as remember t_mid in seconds starts at 0 
+                )
+            )(tmid_all)
+    
+            # Transpose amplitudes and phases to shape (num_times, num_sources, num_modes) for scanning over time tranches.
+            amps_all = amplitudes.transpose(2, 0, 1)    
+            phases_all = phases.transpose(2, 0, 1)
+    
+            # Precompute frequency-evolution quantities shared by each time tranche.
+            f_0_all = (
+                jax.vmap(
+                    lambda t_mid_mass: jax.vmap(
+                        lambda t, eta, pc: jax.vmap(lambda p: imr_omega(t, eta, p))(pc)
+                    )(t_mid_mass, wf_params.eta, overall_phase_coeffs)
+                )(tmid_mass_all)
+                / (2 * jnp.pi)
+            )# IN MASS UNITS
+    
+            # Precompute f_dot at midpoints for all sources and modes.
+            f_dot_all = (
+                jax.vmap(
+                    lambda t_mid_mass: jax.vmap(
+                        lambda t, eta, pc: jax.vmap(lambda p: imr_omega_dot(t, eta, p))(pc)
+                    )(t_mid_mass, wf_params.eta, overall_phase_coeffs)
+                )(tmid_mass_all)
+                / (2 * jnp.pi)
+            )# IN MASS UNITS
+    
+            f_0_all = jax.vmap(
+                lambda f0_t: jax.vmap(mass_to_hz, in_axes=(0, 0))(f0_t, wf_params.total_mass)
+            )(f_0_all)# Convert f_0 to Hz
+    
+            f_dot_all = jax.vmap(
+                lambda fd_t: jax.vmap(df_dt_to_Hz_squared, in_axes=(0, 0))(
+                    fd_t, wf_params.total_mass
+                )
+            )(f_dot_all)# Convert f_dot to Hz^2
+            
+            # Work out for each source, for each mode, for each time segment, what are the closest frequencies on the grid.
+            closest_frequency_indexes_all = jnp.round(
+                (f_0_all - frequency_grid[0]) / dF
+            ).astype(jnp.int32)
+    
+            # Clip to valid range to avoid out-of-bounds indexing later (we will mask out contributions from out-of-bounds frequencies anyway, so the clipping won't affect the final result)
+            closest_frequency_indexes_all = jnp.clip(
+                closest_frequency_indexes_all, 0, frequency_grid.size - 1
+            )
+    
+            # Get the actual closest frequencies from the grid for each source, mode, and time segment.
+            closest_frequencies_all = frequency_grid[closest_frequency_indexes_all]
+    
+            # For every frequency in closest_frequencies_all, we will generate a frequency array around it +/- closest_f_bins by going in steps of dF inside the scan loop.
+            freq_offsets = jnp.arange(0, 2 * closest_f_bins, dtype=frequency_grid.dtype)
+            idx_offsets = jnp.arange(0, 2 * closest_f_bins, dtype=jnp.int32)
+            
+            # Compute the frequency arrays and corresponding indices for all sources, modes, and time segments at once.
+            frequencies_all = (
+                closest_frequencies_all[:, :, :, None]
+                + (freq_offsets[None, None, None, :] - closest_f_bins) * dF
+            )# (num_time_tranches, num_sources, num_modes, 2 * closest_f_bins)
+            frequency_indices_all = (
+                closest_frequency_indexes_all[:, :, :, None]
+                + (idx_offsets[None, None, None, :] - closest_f_bins)
+            ) # (num_time_tranches, num_sources, num_modes, 2 * closest_f_bins)
+    
+            #TODO: This can be removed
+            dT = t1_all[0] - t0_all[0] # Assuming uniform time grid, this is the width of each time segment.
+
+            alpha_offset = 1/(tukey_alpha*dT)
+
+            # ---------------- Response setup (done once, used inside the scan) ----------------
+            n_freq = frequency_grid.size # Number of frequency bins in the full grid
+            n_bins = 2 * closest_f_bins  # static: closest_f_bins is a static argument
+
+            # The response harmonic index must line up one-to-one, and in the same order, with the
+            # waveform modes, because inside the scan we pair mode m's transfer function with mode m's
+            # waveform. self.ells/self.mms and response_object.modes are concrete, so this is a
+            # trace-time check.
+            # wf_mode_labels = tuple(
+            #     f"{int(l)}{int(m)}" for l, m in zip(self.ells, self.mms)
+            # )
+            # if tuple(self.response_object.modes) != wf_mode_labels:
+            #     raise ValueError(
+            #         f"Response modes {tuple(self.response_object.modes)} must match the waveform "
+            #         f"modes {wf_mode_labels} exactly (same set, same order). Re-run "
+            #         f"setup_response_class(..., modes={list(wf_mode_labels)})."
+            #     )
+
+            # Per-source extrinsic angles, shape (num_sources,). Captured by the scan closure.
+            # The response builds its own Y_lm(inclination, phi) inside evaluate_P_lm, so `phi` must be
+            # the *same* azimuthal angle the waveform uses for its harmonics, i.e. pi/2 - phi_ref.
+            lon_arr = jnp.atleast_1d(longitude)
+            lat_arr = jnp.atleast_1d(latitude)
+            psi_arr = jnp.atleast_1d(psi)
+            incl_arr = jnp.atleast_1d(inclination)
+            azimuth_arr = jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)
+            # -----------------------------------------------------------------------------------
+
+            def scan_step(_, scan_inputs):
+                t_0, t_1,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices = scan_inputs
+    
+                h_prefactor = (
+                    Amps[:, :, jnp.newaxis]
+                    * jnp.exp(1j * Phases[:, :, jnp.newaxis])
+                    / jnp.sqrt(2 * f_dot[:, :, jnp.newaxis])
+                    * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
+                )
+    
+                normal_phase_prefactor = jnp.exp(-1j*jnp.pi*((f_0[:, :, jnp.newaxis] - frequencies)**2)/f_dot[:, :, jnp.newaxis])
+                
+    
+                #--------- roll-on ---------# tau in [-dT/2, 1/2(-dT+alpha*dT)]
+                tau_lo = -0.5*dT
+                tau_hi = 0.5*(-dT + tukey_alpha*dT)
+    
+                # 1/2* (constant 1) part 
+                v_nm_end = v_new(f_dot, tau_hi, frequencies, f_0)
+                v_nm_begin = v_new(f_dot, tau_lo, frequencies, f_0)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
+                I = C_vn_end - C_vn_begin + 1j * (S_vn_end - S_vn_begin)
+    
+                # 1/2 here comes from the tukey window prefactor 
+                h_flat_roll_on = 0.5 * normal_phase_prefactor * I
+    
+    
+                # Now the 1/2*cos(..) part 
+                phase_prefactor_plus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis]-frequencies+alpha_offset)**2/f_dot[:, :, jnp.newaxis])
+    
+                prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
+    
+                v_nm_end_plus = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
+                v_nm_begin_plus = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+                h_roll_on_positive = prefactor/4*phase_prefactor_plus*I        
+    
+    
+                prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
+    
+                phase_prefactor_minus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
+    
+                v_nm_end_minus = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
+                v_nm_begin_minus = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+                h_roll_on_negative = prefactor/4*phase_prefactor_minus*I
+    
+                #--------- middle -----------$ tau in [1/2(-dT+alpha*dT), 1/2(dT-alpha*dT)]
+                # Mid: Bit where the window is completely flat, w(t) = 1, so just normal fresnel integral between different limits
+                tau_lo = 0.5*(-dT + tukey_alpha*dT)
+                tau_hi = 0.5*(dT - tukey_alpha*dT)
+    
+    
+                # Normal fresnel evaluated with different limits
+                v_nm_end_mid = v_new(f_dot,tau_hi,frequencies,f_0)
+                v_nm_begin_mid = v_new(f_dot,tau_lo,frequencies,f_0)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_mid)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_mid)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+                h_mid = normal_phase_prefactor*I
+    
+                #--------- roll-off ---------# tau in [1/2(dT-alpha*dT), dT/2]  
+                tau_lo = 0.5*(dT - tukey_alpha*dT)
+                tau_hi = 0.5*dT
+    
+                # First of all the 1/2(1) part : Normal fresnel evaluated between different limits
+    
+                v_nm_end_roll_off = v_new(f_dot,tau_hi,frequencies,f_0)
+                v_nm_begin_roll_off = v_new(f_dot,tau_lo,frequencies,f_0)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_roll_off)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_roll_off)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+                h_roll_off_flat = 1/2*normal_phase_prefactor*I
+    
+                # 1/2 here comes from the tukey window
+    
+                # Then the 1/2*(cos(...)) part
+    
+                phase_prefactor_plus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies + alpha_offset)**2/f_dot[:, :, jnp.newaxis])
+                phase_prefactor_minus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
+    
+                v_nm_end_plus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
+                v_nm_begin_plus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus_roll_off)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus_roll_off)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+    
+                prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
+    
+                
+                # Need to careful evaluate the roll on and roll off limits 
+                h_roll_off_positive = prefactor/4*phase_prefactor_plus_roll_off*I
+    
+                v_nm_end_minus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
+                v_nm_begin_minus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
+                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus_roll_off)
+                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus_roll_off)
+                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+    
+                prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
+    
+                h_roll_off_negative = prefactor/4*phase_prefactor_minus_roll_off*I
+    
+                # Sum the three pieces to get the full integral with the tukey window taken into account.
+                h_overall = h_prefactor * (h_flat_roll_on + h_roll_on_positive + h_roll_on_negative + h_mid + h_roll_off_flat + h_roll_off_positive + h_roll_off_negative)
+
+                #-------- RESPONSE ---------# (messy as hell for now, I am sorry)
+
+                # One SFT segment at a time: compute the transfer functions for all sources and modes,
+                # multiply straight onto h_overall, and scatter onto the full frequency grid, so the
+                # scan directly stacks a (num_sources, num_channels, n_freq) block per segment.
+                
+                def response_for_source(freqs_source, lon, lat, pol, incl, azimuth):
+                    # freqs_source: (n_modes, n_bins) -> flattened in C order to (n_modes*n_bins,)
+                    return self.response_object.compute_response(
+                        time_index=t_index,
+                        freqs=freqs_source.flatten(),
+                        longitude=lon,
+                        latitude=lat,
+                        polarization=pol,
+                        inclination=incl,
+                        phi=azimuth,
+                    ) # (num_channels, n_modes[response], n_modes*n_bins)
+
+                # vmap over sources; frequencies is this segment's slice, shape (num_sources, n_modes, n_bins).
+                response_seg = jax.vmap(response_for_source)(
+                    frequencies, lon_arr, lat_arr, psi_arr, incl_arr, azimuth_arr
+                ) # (num_sources, num_channels, n_modes[response], n_modes*n_bins)
+
+                # Unflatten the response frequency axis back to (mode, bin). 
+                response_seg = response_seg.reshape(*response_seg.shape[:-1], n_modes, n_bins)
+
+                # TODO: Change this somehow so that the response is only computing transfer function for each mode at its repsective frequencies. 
+                # Every harmonic's transfer function was evaluated at *every* mode's frequency block, 
+                # but only the diagonal is physical: mode m's transfer function at mode m's own frequencies.
+                #  jnp.diagonal puts the surviving diagonal axis last, so move it back in front of the bins.
+                transfer_seg = jnp.moveaxis(
+                    jnp.diagonal(response_seg, axis1=-3, axis2=-2), -1, -2
+                ) # (num_sources, num_channels, n_modes, n_bins)
+
+                # Fourier-convention flip. The response follows Marsat's convention; this waveform uses
+                # the opposite sign, which for the linear relation h_chan = T h_lm means conjugating the
+                # kernel 
+                transfer_seg = transfer_seg.conj()
+
+                # before this next step h_overal has shape (num_sources, n_modes, n_bins) and transfer_seg has shape (num_sources, num_channels, n_modes, n_bins).
+
+                # T^lm(f) * h^lm(f), broadcasting the transfer functions over the channel axis.
+                channel_modes_seg = transfer_seg * h_overall[:, None, :, :]
+                # (num_sources, num_channels, n_modes, n_bins)
+
+                def scatter_channels(channel_modes_source, indices_source):
+                    """
+                    Scatter one source's channel waveforms onto the full frequency grid.
+
+                    channel_modes_source: (num_channels, n_modes, n_bins) - T^lm * h^lm per channel
+                    indices_source:       (n_modes, n_bins)               - frequency bin indices, shared by channels
+
+                    Returns: (num_channels, n_freq) - summed over modes at the correct frequency positions
+                    """
+                    flat_indices = indices_source.flatten()                                     # (n_modes*n_bins,)
+                    flat_values = channel_modes_source.reshape(channel_modes_source.shape[0], -1) # (num_channels, n_modes*n_bins)
+
+                    # clip the indices so the scatter itself stays in range. in the frequencies. 
+                    valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
+                    flat_values = jnp.where(valid_mask[None, :], flat_values, 0.0)
+                    safe_indices = jnp.clip(flat_indices, 0, n_freq - 1)
+
+                    # .at[].add() accumulates over duplicate indices, so overlapping modes sum.
+                    return jax.vmap(
+                        lambda vals: jnp.zeros(n_freq, dtype=flat_values.dtype).at[safe_indices].add(vals)
+                    )(flat_values)
+
+                # vmap over sources: (num_sources, num_channels, n_freq) for this segment.
+                channels_seg = jax.vmap(scatter_channels)(channel_modes_seg, frequency_indices)
+
+                return None, (h_overall, frequency_indices, channels_seg)
+    
+            _, (waveform_steps, frequency_indices_steps, channels_steps) = jax.lax.scan(
+                scan_step,
+                None,
+                (
+                    t0_all,
+                    t1_all,
+                    t_indices,
+                    tmid_all,
+                    amps_all,
+                    phases_all,
+                    f_0_all,
+                    f_dot_all,
+                    frequencies_all,
+                    frequency_indices_all,
+                ),
+            )
+
+            waveform_storage = waveform_steps
+            frequency_indices_storage = frequency_indices_steps
+
+            # The scan stacks the per-segment channel blocks along the leading (time) axis:
+            # channels_steps is (num_times, num_sources, num_channels, n_freq).
+            tf_grid_channels = channels_steps.transpose(1, 0, 2, 3)
+            # (num_sources, num_times, num_channels, n_freq)
+
+            # # Transpose to (num_sources, num_times, num_modes, 2*closest_f_bins) for vmapping (basically changing around order of axes)
+            # waveform_storage_transposed = waveform_storage.transpose(1, 0, 2, 3)
+            # frequency_indices_transposed = frequency_indices_storage.transpose(1, 0, 2, 3)
+
+            # # Generate spherical harmonics for all modes and sources at once.
+            # y_lms = spin_weighted_spherical_harmonic_all_modes(
+            #             jnp.atleast_1d(inclination)[:, None],
+            #             jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+            #             self.ells,
+            #             self.mms,
+            #         ) #Shape (num_sources, num_modes,1)
+            
+            # y_lmms = spin_weighted_spherical_harmonic_all_modes(
+            #     jnp.atleast_1d(inclination)[:, None],
+            #     jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
+            #     self.negative_ls,
+            #     self.negative_mms, 
+            #     ) #Shape (num_sources, num_modes,1)
+            
+            # K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
+            # K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
+            # # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
+        
+            # def place_waveform_at_time(waveform_modes, indices_modes,K_plus, K_cross):
+            #     """
+            #     Place waveforms from all modes into the frequency grid for a single time step.
+                
+            #     waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
+            #     indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
+            #     K_plus: (n_modes,) - complex coefficients for plus polarization
+            #     K_cross: (n_modes,) - complex coefficients for cross polarization
+                
+            #     Returns: (n_freq,) - summed waveform across modes at correct frequency positions
+            #     """
+            #     # Multiply K coefficients *before* flattening so each mode's scalar
+            #     # broadcasts across its 2*closest_f_bins frequency entries.
+            #     # K_plus/K_cross: (n_modes,), waveform_modes: (n_modes, 2*closest_f_bins) 
+            #     h_plus_modes = K_plus[:, None] * waveform_modes   # (n_modes, 2*closest_f_bins)
+            #     h_cross_modes = K_cross[:, None] * waveform_modes
+    
+            #     # Now flatten across modes and frequency bins
+            #     flat_h_plus = h_plus_modes.flatten()
+            #     flat_h_cross = h_cross_modes.flatten()
+            #     flat_indices = indices_modes.flatten()
+    
+            #     # Mask out-of-bounds indices: zero their contributions
+            #     valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
+            #     flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
+            #     flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
+                
+            #     # Clip indices to valid range so .at[].add() doesn't error with out-of-bounds indices.
+            #     # The zeroed values mean nothing is actually added for these entries.
+            #     flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
+    
+            #     result_plus = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_plus)
+            #     result_cross = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_cross)
+    
+            #     return result_plus, result_cross
+    
+            # def process_source(waveforms_per_source, indices_per_source,K_plus, K_cross):
+            #     """
+            #     Process all time steps for a single source.
+                
+            #     waveforms_per_source: (n_times, n_modes, 2*closest_f_bins), this is a version of the TF grid for one source (with the wrong frequency axis)
+            #     indices_per_source: (n_times, n_modes, 2*closest_f_bins)
+            #     K_plus: (n_modes,) - complex coefficients for plus polarization
+            #     K_cross: (n_modes,) - complex coefficients for cross polarization
+                
+            #     Returns: (n_times, n_freq) - TF map for this source
+            #     """
+            #     # This is vmapping across timesteps
+            #     return jax.vmap(place_waveform_at_time, in_axes = (0, 0, None, None) )(waveforms_per_source, indices_per_source,K_plus, K_cross)
+    
+            # # NOTE: this is a 2 nested vmap, its just done like this right now for readability and debugging. 
+            # # Vmap over sources to get final tf_grid with shape (num_sources, num_times, num_freq)
+            # tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
+            #     waveform_storage_transposed,
+            #     frequency_indices_transposed,
+            #     K_plus_lms,
+            #     K_cross_lms
+            # ) # vmap over *SOURCES*
+    
+            # # Rotate by polarization angle psi for each source (applied to all modes in the same way)
+            # tf_grid_plus, tf_grid_cross = jax.vmap(self.rotate_by_polarization_angle)(
+            #     tf_grid_plus, tf_grid_cross, wf_params.psi
+            # )
+            
+            
+            # # tf_grid_channels: (num_sources, num_times, num_channels, n_freq) - the responded TDI channels.
+            # # tf_grid_plus/cross: (num_sources, num_times, n_freq) - the un-responded polarizations, kept for debugging.
+            return (tf_grid_channels)
+    
+
 
 
 @jax.jit
@@ -2630,5 +3185,4 @@ def v_tukey(f_dot_0,tau,f,f_0,alpha_term):
 def v_new(f_dot_0,tau,f,f_0):
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*(tau + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
-
 
