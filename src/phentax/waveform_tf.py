@@ -2634,7 +2634,7 @@ class IMRPhenomTHM_TF:
                                                 channels = channels)
 
 
-    # @jax.jit(static_argnums=[0,1,2,13,14,15,16,17])
+    @jax.jit(static_argnums=[0,13,14,15,16])
     def get_tf_fresnel_tukey_midpoint_response(self,
                                     time_grid: Array,
                                     frequency_grid: Array,
@@ -2873,7 +2873,7 @@ class IMRPhenomTHM_TF:
             # -----------------------------------------------------------------------------------
 
             def scan_step(_, scan_inputs):
-                t_0, t_1,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices = scan_inputs
+                t_0, t_1,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices, valid = scan_inputs
     
                 h_prefactor = (
                     Amps[:, :, jnp.newaxis]
@@ -2992,7 +2992,23 @@ class IMRPhenomTHM_TF:
                 # One SFT segment at a time: compute the transfer functions for all sources and modes,
                 # multiply straight onto h_overall, and scatter onto the full frequency grid, so the
                 # scan directly stacks a (num_sources, num_channels, n_freq) block per segment.
-                
+
+                # The transfer function must be evaluated at only at the frequencies actually swept by the mode during an segment. 
+                # *Not the leakage* that comes from this. 
+                # Inside the segment the mode sweeps [f_0 - f_dot*dT/2, f_0 + f_dot*dT/2]. 
+                # In this region the transfer function is evaluated at the bin frequencies as usual. 
+
+                # Once the bin_number is beyond those swept by the mode, the transfer function is clipped 
+                #   to be evaluated at the minimum and maximum of that swept by the mode, i.e. transfer(f_min) and transfer(f_max)
+                #   where f_min = f_0 - f_dot*dT/2 and f_max = f_0 + f_dot*dT/2. 
+                #   This is an approximation. 
+    
+                f_sweep_lo = f_0 - 0.5 * f_dot * dT   # (num_sources, n_modes)
+                f_sweep_hi = f_0 + 0.5 * f_dot * dT
+                response_freqs = jnp.clip(
+                    frequencies, f_sweep_lo[:, :, None], f_sweep_hi[:, :, None]
+                )
+
                 def response_for_source(freqs_source, lon, lat, pol, incl, azimuth):
                     # freqs_source: (n_modes, n_bins) -> flattened in C order to (n_modes*n_bins,)
                     return self.response_object.compute_response(
@@ -3005,9 +3021,9 @@ class IMRPhenomTHM_TF:
                         phi=azimuth,
                     ) # (num_channels, n_modes[response], n_modes*n_bins)
 
-                # vmap over sources; frequencies is this segment's slice, shape (num_sources, n_modes, n_bins).
+                # vmap over sources; response_freqs is this segment's slice, shape (num_sources, n_modes, n_bins).
                 response_seg = jax.vmap(response_for_source)(
-                    frequencies, lon_arr, lat_arr, psi_arr, incl_arr, azimuth_arr
+                    response_freqs, lon_arr, lat_arr, psi_arr, incl_arr, azimuth_arr
                 ) # (num_sources, num_channels, n_modes[response], n_modes*n_bins)
 
                 # Unflatten the response frequency axis back to (mode, bin). 
@@ -3026,7 +3042,7 @@ class IMRPhenomTHM_TF:
                 # kernel 
                 transfer_seg = transfer_seg.conj()
 
-                # before this next step h_overal has shape (num_sources, n_modes, n_bins) and transfer_seg has shape (num_sources, num_channels, n_modes, n_bins).
+                # before this next step h_overall has shape (num_sources, n_modes, n_bins) and transfer_seg has shape (num_sources, num_channels, n_modes, n_bins).
 
                 # T^lm(f) * h^lm(f), broadcasting the transfer functions over the channel axis.
                 channel_modes_seg = transfer_seg * h_overall[:, None, :, :]
@@ -3057,9 +3073,14 @@ class IMRPhenomTHM_TF:
                 # vmap over sources: (num_sources, num_channels, n_freq) for this segment.
                 channels_seg = jax.vmap(scatter_channels)(channel_modes_seg, frequency_indices)
 
-                return None, (h_overall, frequency_indices, channels_seg)
+                # Zero post-merger (source) contributions for this segment. jnp.where, not
+                # multiplication: the sanitized f_dot still yields inf/NaN in masked entries,
+                # and mask * NaN would stay NaN.
+                channels_seg = jnp.where(valid[:, None, None], channels_seg, 0.0)
+
+                return None, (channels_seg)
     
-            _, (waveform_steps, frequency_indices_steps, channels_steps) = jax.lax.scan(
+            _, (tf_grid_channels) = jax.lax.scan(
                 scan_step,
                 None,
                 (
@@ -3073,112 +3094,21 @@ class IMRPhenomTHM_TF:
                     f_dot_all,
                     frequencies_all,
                     frequency_indices_all,
+                    valid_all, 
                 ),
             )
+            # (num_times, num_sources, num_channels, n_freq)
+
 
             # Zero invalid (segment, source) contributions. jnp.where, not multiplication:
             # where selects 0 even if the masked value is inf/NaN; mask * NaN would stay NaN.
-            channels_steps = jnp.where(valid_all[:, :, None, None], channels_steps, 0.0)
-
-
-            waveform_storage = waveform_steps
-            frequency_indices_storage = frequency_indices_steps
+            # tf_grid_channels = jnp.where(valid_all[:, :, None, None], channels_steps, 0.0)
 
             # The scan stacks the per-segment channel blocks along the leading (time) axis:
             # channels_steps is (num_times, num_sources, num_channels, n_freq).
-            tf_grid_channels = channels_steps.transpose(1, 0, 2, 3)
-            # (num_sources, num_times, num_channels, n_freq)
+            # tf_grid_channels = channels_steps.transpose(1, 0, 2, 3)
 
-            # # Transpose to (num_sources, num_times, num_modes, 2*closest_f_bins) for vmapping (basically changing around order of axes)
-            # waveform_storage_transposed = waveform_storage.transpose(1, 0, 2, 3)
-            # frequency_indices_transposed = frequency_indices_storage.transpose(1, 0, 2, 3)
 
-            # # Generate spherical harmonics for all modes and sources at once.
-            # y_lms = spin_weighted_spherical_harmonic_all_modes(
-            #             jnp.atleast_1d(inclination)[:, None],
-            #             jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
-            #             self.ells,
-            #             self.mms,
-            #         ) #Shape (num_sources, num_modes,1)
-            
-            # y_lmms = spin_weighted_spherical_harmonic_all_modes(
-            #     jnp.atleast_1d(inclination)[:, None],
-            #     jnp.pi / 2.0 - jnp.atleast_1d(phi_ref)[:, None],
-            #     self.negative_ls,
-            #     self.negative_mms, 
-            #     ) #Shape (num_sources, num_modes,1)
-            
-            # K_plus_lms = 1/2*(y_lms[:,:,0] + (-1)**self.negative_ls*y_lmms[:,:,0].conj()).conj() # Overall Conj to flip the fourier convention (Compared to that of Marsat appendix. )
-            # K_cross_lms = (1j/2*(y_lms[:,:,0] - (-1)**self.negative_ls*y_lmms[:,:,0].conj())).conj() # Overall Conj (including the 1j prefactor!) to flip the fourier convention (Compared to that of Marsat appendix.)
-            # # Shapes of K are (num_sources, num_modes) where num_modes includes only the positive modes (we are doing the reflection trick for negative modes for non-precessing binaries)
-        
-            # def place_waveform_at_time(waveform_modes, indices_modes,K_plus, K_cross):
-            #     """
-            #     Place waveforms from all modes into the frequency grid for a single time step.
-                
-            #     waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
-            #     indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
-            #     K_plus: (n_modes,) - complex coefficients for plus polarization
-            #     K_cross: (n_modes,) - complex coefficients for cross polarization
-                
-            #     Returns: (n_freq,) - summed waveform across modes at correct frequency positions
-            #     """
-            #     # Multiply K coefficients *before* flattening so each mode's scalar
-            #     # broadcasts across its 2*closest_f_bins frequency entries.
-            #     # K_plus/K_cross: (n_modes,), waveform_modes: (n_modes, 2*closest_f_bins) 
-            #     h_plus_modes = K_plus[:, None] * waveform_modes   # (n_modes, 2*closest_f_bins)
-            #     h_cross_modes = K_cross[:, None] * waveform_modes
-    
-            #     # Now flatten across modes and frequency bins
-            #     flat_h_plus = h_plus_modes.flatten()
-            #     flat_h_cross = h_cross_modes.flatten()
-            #     flat_indices = indices_modes.flatten()
-    
-            #     # Mask out-of-bounds indices: zero their contributions
-            #     valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
-            #     flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
-            #     flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
-                
-            #     # Clip indices to valid range so .at[].add() doesn't error with out-of-bounds indices.
-            #     # The zeroed values mean nothing is actually added for these entries.
-            #     flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
-    
-            #     result_plus = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_plus)
-            #     result_cross = jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_cross)
-    
-            #     return result_plus, result_cross
-    
-            # def process_source(waveforms_per_source, indices_per_source,K_plus, K_cross):
-            #     """
-            #     Process all time steps for a single source.
-                
-            #     waveforms_per_source: (n_times, n_modes, 2*closest_f_bins), this is a version of the TF grid for one source (with the wrong frequency axis)
-            #     indices_per_source: (n_times, n_modes, 2*closest_f_bins)
-            #     K_plus: (n_modes,) - complex coefficients for plus polarization
-            #     K_cross: (n_modes,) - complex coefficients for cross polarization
-                
-            #     Returns: (n_times, n_freq) - TF map for this source
-            #     """
-            #     # This is vmapping across timesteps
-            #     return jax.vmap(place_waveform_at_time, in_axes = (0, 0, None, None) )(waveforms_per_source, indices_per_source,K_plus, K_cross)
-    
-            # # NOTE: this is a 2 nested vmap, its just done like this right now for readability and debugging. 
-            # # Vmap over sources to get final tf_grid with shape (num_sources, num_times, num_freq)
-            # tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
-            #     waveform_storage_transposed,
-            #     frequency_indices_transposed,
-            #     K_plus_lms,
-            #     K_cross_lms
-            # ) # vmap over *SOURCES*
-    
-            # # Rotate by polarization angle psi for each source (applied to all modes in the same way)
-            # tf_grid_plus, tf_grid_cross = jax.vmap(self.rotate_by_polarization_angle)(
-            #     tf_grid_plus, tf_grid_cross, wf_params.psi
-            # )
-            
-            
-            # # tf_grid_channels: (num_sources, num_times, num_channels, n_freq) - the responded TDI channels.
-            # # tf_grid_plus/cross: (num_sources, num_times, n_freq) - the un-responded polarizations, kept for debugging.
             return (tf_grid_channels)
     
 
