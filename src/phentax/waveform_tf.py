@@ -2873,136 +2873,98 @@ class IMRPhenomTHM_TF:
             # -----------------------------------------------------------------------------------
 
             def scan_step(_, scan_inputs):
-                t_0, t_1,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices, valid = scan_inputs
-    
+                t_0,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices, valid = scan_inputs
+
+                # Rejigged efficient vectorized version of the fresnel integral with tukey window:
+
+                # Prefactor for the whole integral, applies to all the terms. 
                 h_prefactor = (
                     Amps[:, :, jnp.newaxis]
                     * jnp.exp(1j * Phases[:, :, jnp.newaxis])
                     / jnp.sqrt(2 * f_dot[:, :, jnp.newaxis])
                     * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
                 )
-    
-                normal_phase_prefactor = jnp.exp(-1j*jnp.pi*((f_0[:, :, jnp.newaxis] - frequencies)**2)/f_dot[:, :, jnp.newaxis])
-                
-    
-                #--------- roll-on ---------# tau in [-dT/2, 1/2(-dT+alpha*dT)]
-                tau_lo = -0.5*dT
-                tau_hi = 0.5*(-dT + tukey_alpha*dT)
-    
-                # 1/2* (constant 1) part 
-                v_nm_end = v_new(f_dot, tau_hi, frequencies, f_0)
-                v_nm_begin = v_new(f_dot, tau_lo, frequencies, f_0)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
-                I = C_vn_end - C_vn_begin + 1j * (S_vn_end - S_vn_begin)
-    
-                # 1/2 here comes from the tukey window prefactor 
-                h_flat_roll_on = 0.5 * normal_phase_prefactor * I
-    
-    
-                # Now the 1/2*cos(..) part 
-                phase_prefactor_plus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis]-frequencies+alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-    
-                prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
-    
-                v_nm_end_plus = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
-                v_nm_begin_plus = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-    
-                h_roll_on_positive = prefactor/4*phase_prefactor_plus*I        
-    
-    
-                prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
-    
+
+                # Precomputing phase prefactors used a few times. 
+                normal_phase_prefactor = jnp.exp(-1j*jnp.pi*((f_0[:, :, jnp.newaxis] - frequencies)**2)/f_dot[:, :, jnp.newaxis]) # Phase factor for the flat part
+
+                # Phase factors for the positive and negative alpha offsets to the tukey-fresnel integral terms 
                 phase_prefactor_minus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
+                phase_prefactor_plus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies + alpha_offset)**2/f_dot[:, :, jnp.newaxis])
     
-                v_nm_end_minus = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
-                v_nm_begin_minus = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+
+                # Times at which to evaluate arguments of the fresnel terms within the SFT segment.
+                # These are just the key times within an SFT segment with a tukey window applied. 
+                tau0 = -0.5*dT
+                tau1 = 0.5*(-dT + tukey_alpha*dT)
+                tau2 = 0.5*(dT - tukey_alpha*dT)
+                tau3 = 0.5*dT
+
+                # All the fresnel arguments. 
+                args = jnp.stack(
+                            [v_new(f_dot, t, frequencies, f_0)                  for t in (tau0, tau1, tau2, tau3)] # Arguments for flat parts
+                          + [v_tukey(f_dot, t, frequencies, f_0,  alpha_offset) for t in (tau0, tau1, tau2, tau3)] # Arguments for roll-on/roll-off parts (positive offset integrals)
+                          + [v_tukey(f_dot, t, frequencies, f_0, -alpha_offset) for t in (tau0, tau1, tau2, tau3)] # Arguments for roll-on/roll-off parts (negative offset integrals) 
+                    )                                                       # (12, num_sources, n_modes, n_bins)
+
+                S, C = jax.scipy.special.fresnel(args)
+
+                F = C + 1j * S
+
+                # Unpack fresnel terms 
+                flat_t0,  flat_t1,  flat_t2,  flat_t3  = F[0],  F[1],  F[2],  F[3] 
+                plus_t0,  plus_t1,  plus_t2,  plus_t3  = F[4],  F[5],  F[6],  F[7]
+                minus_t0, minus_t1, minus_t2, minus_t3 = F[8],  F[9],  F[10], F[11]
+
     
-                h_roll_on_negative = prefactor/4*phase_prefactor_minus*I
-    
-                #--------- middle -----------$ tau in [1/2(-dT+alpha*dT), 1/2(dT-alpha*dT)]
-                # Mid: Bit where the window is completely flat, w(t) = 1, so just normal fresnel integral between different limits
-                tau_lo = 0.5*(-dT + tukey_alpha*dT)
-                tau_hi = 0.5*(dT - tukey_alpha*dT)
-    
-    
-                # Normal fresnel evaluated with different limits
-                v_nm_end_mid = v_new(f_dot,tau_hi,frequencies,f_0)
-                v_nm_begin_mid = v_new(f_dot,tau_lo,frequencies,f_0)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_mid)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_mid)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-    
-                h_mid = normal_phase_prefactor*I
-    
-                #--------- roll-off ---------# tau in [1/2(dT-alpha*dT), dT/2]  
-                tau_lo = 0.5*(dT - tukey_alpha*dT)
-                tau_hi = 0.5*dT
-    
-                # First of all the 1/2(1) part : Normal fresnel evaluated between different limits
-    
-                v_nm_end_roll_off = v_new(f_dot,tau_hi,frequencies,f_0)
-                v_nm_begin_roll_off = v_new(f_dot,tau_lo,frequencies,f_0)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_roll_off)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_roll_off)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-    
-                h_roll_off_flat = 1/2*normal_phase_prefactor*I
-    
-                # 1/2 here comes from the tukey window
-    
-                # Then the 1/2*(cos(...)) part
-    
-                phase_prefactor_plus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies + alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-                phase_prefactor_minus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-    
-                v_nm_end_plus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
-                v_nm_begin_plus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus_roll_off)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus_roll_off)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-    
-    
-                prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
-    
+                W = jnp.exp(2j * jnp.pi / tukey_alpha * (0.5 - tukey_alpha / 2))
+                W_conj = jnp.conj(W)
+
+                # The subtraction is simply the fresnel term evaluated at the upper limit minus the fresnel term evaluated at the lower limit, for each of the three pieces of the integral.
                 
-                # Need to careful evaluate the roll on and roll off limits 
-                h_roll_off_positive = prefactor/4*phase_prefactor_plus_roll_off*I
-    
-                v_nm_end_minus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
-                v_nm_begin_minus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
-                S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus_roll_off)
-                S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus_roll_off)
-                I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-    
-                prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
-    
-                h_roll_off_negative = prefactor/4*phase_prefactor_minus_roll_off*I
+                # Roll on terms
+                h_flat_roll_on      = 0.5 * normal_phase_prefactor * (flat_t1  - flat_t0)
+                h_roll_on_positive  = W      / 4 * phase_prefactor_plus  * (plus_t1  - plus_t0)
+                h_roll_on_negative  = W_conj / 4 * phase_prefactor_minus * (minus_t1 - minus_t0)
+
+                # Flat middle. 
+                h_mid               =       normal_phase_prefactor * (flat_t2  - flat_t1)
+
+                # Roll off terms
+                h_roll_off_flat     = 0.5 * normal_phase_prefactor * (flat_t3  - flat_t2)
+                h_roll_off_positive = W_conj / 4 * phase_prefactor_plus  * (plus_t3  - plus_t2)
+                h_roll_off_negative = W      / 4 * phase_prefactor_minus * (minus_t3 - minus_t2)
     
                 # Sum the three pieces to get the full integral with the tukey window taken into account.
-                h_overall = h_prefactor * (h_flat_roll_on + h_roll_on_positive + h_roll_on_negative + h_mid + h_roll_off_flat + h_roll_off_positive + h_roll_off_negative)
+                h_overall =(h_prefactor * (h_flat_roll_on + 
+                                           h_roll_on_positive + 
+                                           h_roll_on_negative + 
+                                           h_mid + 
+                                           h_roll_off_flat + 
+                                           h_roll_off_positive + 
+                                           h_roll_off_negative))
+
+
                 #-------- RESPONSE ---------# (messy as hell for now, I am sorry)
 
                 # One SFT segment at a time: compute the transfer functions for all sources and modes,
                 # multiply straight onto h_overall, and scatter onto the full frequency grid, so the
                 # scan directly stacks a (num_sources, num_channels, n_freq) block per segment.
 
-                # The transfer function must be evaluated at only at the frequencies actually swept by the mode during an segment. 
-                # *Not the leakage* that comes from this. 
+                # For these signals there is significant leakage around the signal, close to merger the signal also sweeps
+                #   multiple fourier bins. The transfer function needs to only be evaluated at the frequencies actually swept by the mode during an segment.
+                #   For the frequencies at which "leakage" occurs, we make the following intuitive approximation: 
+                #    
+                #   The leakage above (below) the maximum (minimum) frequency swept by the signal is treated as having "leaked" from the maximum (minimum) frequency swept by the signal. 
+                #   Therefore the upper-end leakage has the frequency response evaluated at the maximum frequency swept by the mode,
+                #   and the lower-end leakage has the frequency response evaluated at the minimum frequency swept by the mode.
+                #   This is equivalent to "clipping the response function" to the maximum and minimum frequencies swept by the mode during the segment.
+
+
                 # Inside the segment the mode sweeps [f_0 - f_dot*dT/2, f_0 + f_dot*dT/2]. 
                 # In this region the transfer function is evaluated at the bin frequencies as usual. 
-
-                # Once the bin_number is beyond those swept by the mode, the transfer function is clipped 
-                #   to be evaluated at the minimum and maximum of that swept by the mode, i.e. transfer(f_min) and transfer(f_max)
-                #   where f_min = f_0 - f_dot*dT/2 and f_max = f_0 + f_dot*dT/2. 
-                #   This is an approximation. 
-    
+                
+                # Remember, midpoint fresnel so we are expanding in both directions to find f0 and f1. 
                 f_sweep_lo = f_0 - 0.5 * f_dot * dT   # (num_sources, n_modes)
                 f_sweep_hi = f_0 + 0.5 * f_dot * dT
                 response_freqs = jnp.clip(
@@ -3078,14 +3040,14 @@ class IMRPhenomTHM_TF:
                 # and mask * NaN would stay NaN.
                 channels_seg = jnp.where(valid[:, None, None], channels_seg, 0.0)
 
-                return None, (channels_seg)
+                # Return complex64 data to save memory. 
+                return None, (channels_seg.astype(jnp.complex64)) # (num_sources, num_channels, n_freq)
     
             _, (tf_grid_channels) = jax.lax.scan(
                 scan_step,
                 None,
                 (
                     t0_all,
-                    t1_all,
                     t_indices,
                     tmid_all,
                     amps_all,
@@ -3098,16 +3060,6 @@ class IMRPhenomTHM_TF:
                 ),
             )
             # (num_times, num_sources, num_channels, n_freq)
-
-
-            # Zero invalid (segment, source) contributions. jnp.where, not multiplication:
-            # where selects 0 even if the masked value is inf/NaN; mask * NaN would stay NaN.
-            # tf_grid_channels = jnp.where(valid_all[:, :, None, None], channels_steps, 0.0)
-
-            # The scan stacks the per-segment channel blocks along the leading (time) axis:
-            # channels_steps is (num_times, num_sources, num_channels, n_freq).
-            # tf_grid_channels = channels_steps.transpose(1, 0, 2, 3)
-
 
             return (tf_grid_channels)
     
@@ -3128,4 +3080,3 @@ def v_tukey(f_dot_0,tau,f,f_0,alpha_term):
 def v_new(f_dot_0,tau,f,f_0):
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*(tau + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
-
