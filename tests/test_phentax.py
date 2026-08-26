@@ -1,5 +1,3 @@
-# Copyright (C) 2024 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Tests for phentax package.
 
@@ -26,7 +24,6 @@ class TestImports:
         import phentax
 
         assert hasattr(phentax, "__version__")
-        assert phentax.__version__ == "0.1.0"
 
     def test_import_config_constants(self):
         """Test constants module import."""
@@ -285,10 +282,11 @@ class TestWaveform:
             chi2z=0.0,
             distance=100.0,
             phi_ref=0.0,
-            f_ref=20.0,
-            f_min=20.0,
             inclination=0.0,
             psi=0.0,
+            # delta_t=1.0 / 4096.0,
+            f_ref=20.0,
+            f_min=20.0,
         )
 
         assert hp.shape == times.shape
@@ -314,6 +312,7 @@ class TestWaveform:
             f_min=20.0,
             inclination=0.0,
             psi=0.0,
+            # delta_t=1.0 / 4096.0,
         )
 
         times1, mask1, hp1, hc1 = model.compute_polarizations(**kwargs)
@@ -339,6 +338,7 @@ class TestWaveform:
             f_min=20.0,
             inclination=0.0,
             psi=0.0,
+            # delta_t=1.0 / 4096.0,
         )
 
         assert jnp.all(jnp.isfinite(hlms[0][mask]))

@@ -17,15 +17,20 @@ jax.config.update("jax_enable_x64", True)  # Use double precision for time calcu
 import jax.numpy as jnp
 from jaxtyping import Array
 
-SCALE_FACTOR = (
+MINIMUM_SCALE_FACTOR = (
+    8.0  # Minimum allowed value for the scale factor to prevent under-sampling
+)
+DEFAULT_SCALE_FACTOR = (
     12.0  # This is a tunable parameter that controls the overall density of the grid.
 )
 BUCKET_SIZE = (
-    2000  # Number of steps per bucket for JIT cache friendliness.  Must be >= 1.
+    5000  # Number of steps per bucket for JIT cache friendliness.  Must be >= 1.
 )
 
 
-def leading_order_factor(eta: float | Array) -> float | Array:
+def leading_order_factor(
+    eta: float | Array, scale_factor: float = DEFAULT_SCALE_FACTOR
+) -> float | Array:
     """
     Compute the leading-order (positive) factor C in the adaptive time step formula.
 
@@ -33,16 +38,20 @@ def leading_order_factor(eta: float | Array) -> float | Array:
     ----------
     eta : float | Array
         Symmetric mass ratio.
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
 
     Returns
     -------
     float | Array
         Leading-order factor C such that :math:`\\Delta t = C \\cdot |t|^{3/8}` in the inspiral.
     """
-    return (2.0 * jnp.pi * 4.0 / SCALE_FACTOR) * jnp.power(eta / 5.0, 3.0 / 8.0)
+    return (2.0 * jnp.pi * 4.0 / scale_factor) * jnp.power(eta / 5.0, 3.0 / 8.0)
 
 
-def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array:
+def leading_order_delta_t(
+    eta: float | Array, t: float | Array, scale_factor: float = DEFAULT_SCALE_FACTOR
+) -> float | Array:
     """
     Compute adaptive time step at leading order in omega.
 
@@ -52,6 +61,11 @@ def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array
         Symmetric mass ratio.
     t : float | Array
         Time in units of total mass M.
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
+
+    t : float | Array
+        Time in units of total mass M.
     Returns
     -------
     float | Array
@@ -59,12 +73,15 @@ def leading_order_delta_t(eta: float | Array, t: float | Array) -> float | Array
         order GW frequency at time t.
     """
 
-    C = leading_order_factor(eta)
+    C = leading_order_factor(eta, scale_factor)
     return C * jnp.power(jnp.abs(t), 3.0 / 8.0)
 
 
 def estimate_adaptive_steps(
-    eta: float | Array, tmin: float | Array, tmax: float | Array
+    eta: float | Array,
+    tmin: float | Array,
+    tmax: float | Array,
+    scale_factor: float = DEFAULT_SCALE_FACTOR,
 ) -> int:
     """
     Estimate the number of adaptive grid steps needed across a batch of binaries.
@@ -87,6 +104,8 @@ def estimate_adaptive_steps(
         Minimum time(s) (start of the grid).
     tmax : float | Array
         Maximum time(s) (end of the grid).
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
 
     Returns
     -------
@@ -98,7 +117,7 @@ def estimate_adaptive_steps(
     tmin = jnp.atleast_1d(jnp.asarray(tmin, dtype=jnp.float64))
     tmax = jnp.atleast_1d(jnp.asarray(tmax, dtype=jnp.float64))
 
-    C = leading_order_factor(eta)
+    C = leading_order_factor(eta, scale_factor)
     C_post = jnp.maximum(1.0, C)
 
     # Post-merger region: tmax → 0 with step C_post (+1 for the t=0 node)
@@ -125,7 +144,9 @@ def estimate_adaptive_steps(
     return max(N_total, BUCKET_SIZE)  # at least BUCKET_SIZE
 
 
-def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
+def estimate_adaptive_steps_from_T(
+    T: float, delta_t: float = 15.0, scale_factor: float = DEFAULT_SCALE_FACTOR
+) -> int:
     """
     Estimate adaptive grid size from observation time and time step only.
 
@@ -140,6 +161,8 @@ def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
         Total observation time in seconds.
     delta_t : float, default 15.0
         Time step in seconds.
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
 
     Returns
     -------
@@ -153,6 +176,7 @@ def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
     # almost always shorter.
     eta_worst = 0.25
     num_steps = T / delta_t
+    t_max = 0.0
     # Use the same formula as estimate_adaptive_steps but with
     # conservative bounds derived from num_steps.
     # In mass-scaled units, the grid spans roughly [-num_steps * delta_t_M, 0]
@@ -160,12 +184,17 @@ def estimate_adaptive_steps_from_T(T: float, delta_t: float = 15.0) -> int:
     # bounding, we use num_steps directly as a proxy for |tmin|.
     # The uniform grid would need num_steps points; the adaptive grid is
     # always sparser, so num_steps is a safe upper bound.
-    return estimate_adaptive_steps(eta_worst, -num_steps, 0.0)
+    return estimate_adaptive_steps(eta_worst, -num_steps, t_max, scale_factor)
 
 
 @partial(jax.jit, static_argnames=["max_steps"])
 def _generate_adaptive_grid(
-    eta: float, tmin: float, tmax: float, Mdelta_t: float, max_steps: int = 10000
+    eta: float,
+    tmin: float,
+    tmax: float,
+    Mdelta_t: float,
+    max_steps: int = 10000,
+    scale_factor: float = DEFAULT_SCALE_FACTOR,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
     Generate an adaptive time grid with t=0 (merger time) always included.
@@ -198,6 +227,8 @@ def _generate_adaptive_grid(
         grid never over-samples the ringdown relative to the uniform grid.
     max_steps : int, optional
         Maximum number of steps in the grid, by default 10000.
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
 
     Returns
     -------
@@ -210,7 +241,7 @@ def _generate_adaptive_grid(
           False means it is a padding value (tmin).
     """
     # Inspiral step-size constant: dt = C * |t|^{3/8}, clamped to C for |t| < 1
-    C = leading_order_factor(eta)
+    C = leading_order_factor(eta, scale_factor)
     # Post-merger step: at least as large as the user's time resolution so we
     # never over-sample the ringdown compared to the uniform grid.
     C_post = jnp.maximum(C, Mdelta_t)
@@ -276,6 +307,7 @@ def generate_adaptive_grid(
     tmaxs: float | Array,
     Mdelta_ts: float | Array,
     max_steps: int = 10000,
+    scale_factor: float = DEFAULT_SCALE_FACTOR,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
     Batch version of generate_adaptive_grid.
@@ -293,6 +325,8 @@ def generate_adaptive_grid(
         set the post-merger step size (see ``_generate_adaptive_grid``).
     max_steps : int, optional
         Maximum number of steps in the grid.
+    scale_factor : float, optional
+        Scale factor for the adaptive time step formula.
 
     Returns
     -------
@@ -304,9 +338,9 @@ def generate_adaptive_grid(
     tmins = jnp.atleast_1d(tmins)
     tmaxs = jnp.atleast_1d(tmaxs)
     Mdelta_ts = jnp.atleast_1d(Mdelta_ts)
-    return jax.vmap(partial(_generate_adaptive_grid, max_steps=max_steps))(
-        etas, tmins, tmaxs, Mdelta_ts
-    )
+    return jax.vmap(
+        partial(_generate_adaptive_grid, max_steps=max_steps, scale_factor=scale_factor)
+    )(etas, tmins, tmaxs, Mdelta_ts)
 
 
 @partial(jax.jit, static_argnames=["max_steps"])

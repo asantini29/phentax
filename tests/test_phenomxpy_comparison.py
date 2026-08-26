@@ -1,5 +1,3 @@
-# Copyright (C) 2024 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Comparison tests between phentax (JAX) and phenomxpy (NumPy/Numba).
 

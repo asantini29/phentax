@@ -1,5 +1,3 @@
-# Copyright (C) 2025 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Tests for amplitude coefficients comparison with phenomxpy.
 """

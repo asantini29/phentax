@@ -1,6 +1,3 @@
-# Copyright (C) 2025 Alessandro Santini
-# SPDX-License-Identifier: MIT
-
 """Tests for coarse_graining.py fixes:
 1. Adaptive grid first point equals tmin exactly.
 2. Post-merger step is max(C, Mdelta_t), never over-sampling relative to
@@ -221,3 +218,26 @@ class TestBatchedGrid:
         )
         assert grids.shape == (1, 5000)
         assert float(grids[masks][0]) == TMIN
+
+
+# ---------------------------------------------------------------------------
+# Scale factor
+# ---------------------------------------------------------------------------
+
+
+class TestScaleFactor:
+    def test_larger_scale_factor_produces_denser_grid(self):
+        """A larger scale_factor should place more grid points for the same span."""
+        Mdelta_t = 3.0
+        _, mask_default = _generate_adaptive_grid(
+            ETA_EQUAL, TMIN, TMAX, Mdelta_t, max_steps=5000, scale_factor=12.0
+        )
+        _, mask_dense = _generate_adaptive_grid(
+            ETA_EQUAL, TMIN, TMAX, Mdelta_t, max_steps=5000, scale_factor=24.0
+        )
+        n_default = int(jnp.sum(mask_default))
+        n_dense = int(jnp.sum(mask_dense))
+        assert n_dense > n_default, (
+            f"scale_factor=24 should produce more points than scale_factor=12: "
+            f"got {n_dense} vs {n_default}"
+        )

@@ -13,7 +13,6 @@ Contains helper functions for mass ratios, spins, unit conversions,
 and spin-weighted spherical harmonics, all implemented in pure JAX.
 """
 
-
 import jax
 import jax.numpy as jnp
 from jax import lax
@@ -21,9 +20,49 @@ from jaxtyping import Array
 
 from .constants import C_SI, MPC_TO_M, MTSUN_SI
 
-# =============================================================================
-# Mass ratio utilities
-# =============================================================================
+
+def is_tracing(x: Array) -> bool:
+    """Return True if *x* is a JAX abstract tracer (i.e. we are inside jax.jit / jax.grad).
+
+    Uses only the public JAX error API.  A concrete array can be converted to a
+    Python float; an abstract tracer raises ``TracerArrayConversionError`` or
+    ``ConcretizationTypeError`` when that conversion is attempted.
+
+    Parameters
+    ----------
+    x : array-like
+        Value to inspect (typically a JAX array or Python scalar).
+
+    Returns
+    -------
+    bool
+        ``True`` when *x* is being traced (abstract); ``False`` when it is a
+        concrete value.
+    """
+    try:
+        float(jnp.atleast_1d(x).reshape(-1)[0])
+        return False
+    except (jax.errors.TracerArrayConversionError, jax.errors.ConcretizationTypeError):
+        return True
+
+
+def to_batch(x: float, n: int) -> Array:
+    """
+    Broadcast a scalar to a batch of size n.
+
+    Parameters
+    ----------
+    x : float
+        Scalar value to broadcast.
+    n : int
+        Batch size.
+
+    Returns
+    -------
+    Array
+        Batched array of size n.
+    """
+    return jnp.broadcast_to(jnp.atleast_1d(jnp.asarray(x)), (n,))
 
 
 @jax.jit
