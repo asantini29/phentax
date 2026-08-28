@@ -1,4 +1,4 @@
-device = "3"
+device = ""
 if len(device) == 0:
     platform = "cpu"
     target_directory = "cpu"
@@ -7,7 +7,6 @@ else:
     target_directory = "gpu"
 
 import os
-
 os.makedirs(target_directory, exist_ok=True)
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -37,10 +36,14 @@ except (ImportError, ModuleNotFoundError):
     print("pysco not found, using default matplotlib style and colormap")
     cmap = plt.get_cmap("cividis")
 
+PLOT_MQ = True
+PLOT_BATCH = True
+
 # ---------------
 tlowfit = True  # use a fit to set the starting time of the root finder used in t(f)
 tol = 1e-12  # root finding tolerance
-Tobs = 2 * ASTRONOMICAL_YEAR / 12
+Tobs = 6 * ASTRONOMICAL_YEAR / 12
+Tobs_batch = 2 * ASTRONOMICAL_YEAR / 12
 dt = 10.0
 # ---------------
 
@@ -50,7 +53,7 @@ distance = 500.0
 inclination = jnp.pi / 3.0
 phi_ref = 0.0
 psi = 1.0
-f_min = 5e-5
+f_min = 9e-5
 delta_t = 10
 f_ref = f_min
 
@@ -60,7 +63,7 @@ qmin, qmax = 0.1, 1.0
 num_per_axis = 20
 Mt_values = jnp.logspace(jnp.log10(Mt_min), jnp.log10(Mt_max), num_per_axis)
 q_values = jnp.linspace(qmin, qmax, num_per_axis)
-N_AVG = 50  # number of times to repeat each computation for averaging
+N_AVG = 50 #50  # number of times to repeat each computation for averaging
 
 batch_sizes = [1, 10, 50, 100, 200]
 
@@ -101,21 +104,51 @@ def fill_batch_arrays(
         psi_batch,
     )
 
-def plot_Mq_times(Mt_values, q_values, times_list):
+def plot_Mq_times(Mt_values, q_values, tmerg_values, times_list):
     Mt_grid, q_grid = np.meshgrid(Mt_values, q_values, indexing="ij")
     times_array = np.array(times_list).reshape(len(Mt_values), len(q_values))
+    Mt_values_np = np.asarray(Mt_values, dtype=float)
+    tmerg_values_np = np.asarray(tmerg_values, dtype=float) / (60.0 * 60. * 24) 
+
+    T_obs_days = Tobs / (60.0 * 60. * 24)
     # limit the time to 3 decimal places for better color scaling
     # times_array = times_array / 1e3 # convert to milliseconds
-    plt.figure()
-    cp = plt.contourf(Mt_grid, q_grid, times_array, levels=20, cmap=cmap)
+    fig, ax = plt.subplots()
+    cp = ax.contourf(Mt_grid, q_grid, times_array, levels=20, cmap=cmap)
+
     # format the time values in the colorbar to be in milliseconds with 2 decimal places
-    cbar = plt.colorbar(cp)
-    cbar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x*1e3:.2f}"))
+    cbar = fig.colorbar(cp, ax=ax)
+    cbar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x*1e3:.1f}"))
     cbar.set_label("Average wall time (ms)", rotation=90, labelpad=12)
-    plt.xscale("log")
-    plt.xlabel(r"Total Mass ($M_{\rm tot}$)")
-    plt.ylabel(r"Mass Ratio ($q$)")
-    plt.savefig(f"{target_directory}/timings_Mt_q.png")
+
+    ax.set_xscale("log")
+    ax.set_xlabel(r"Total Mass ($M_{\rm tot}$)")
+    ax.set_ylabel(r"Mass Ratio ($q$)")
+
+    # Add a top axis that relabels mass ticks using the corresponding merger times.
+    top_ax = ax.twiny()
+    top_ax.set_xscale("log")
+    top_ax.set_xlim(ax.get_xlim())
+    mass_ticks = ax.get_xticks()
+    valid_ticks = mass_ticks[
+        (mass_ticks >= Mt_values_np.min()) & (mass_ticks <= Mt_values_np.max())
+    ]
+
+    tmerg_at_ticks = np.interp(valid_ticks, Mt_values_np, tmerg_values_np)
+    atol_days = max(1e-6, 1e-3 * T_obs_days)
+
+    def format_tmerg_tick(t_days):
+        # Values at the observation limit indicate truncated signals, not full merger times.
+        if t_days >= T_obs_days - atol_days:
+            return r"$\ge T_{\mathrm{obs}}$"
+        return f"{t_days:.2f}"
+
+    top_ax.set_xticks(valid_ticks)
+    top_ax.set_xticklabels([format_tmerg_tick(t) for t in tmerg_at_ticks])
+    top_ax.set_xlabel(r"Merger Time (days) at $q=1$", labelpad=7)
+
+    fig.tight_layout()
+    fig.savefig(f"{target_directory}/timings_Mt_q.png")
     # plt.show()
 
 def plot_batch_times(batch_sizes, batch_times, warmup_batch_times):
@@ -148,107 +181,86 @@ if __name__ == "__main__":
         T=Tobs,
     )
 
-    # warm up
-    m1, m2 = mt_q_to_m1_m2(Mt_values[0], q_values[0])
+    if PLOT_MQ:
+        # warm up
+        m1, m2 = mt_q_to_m1_m2(Mt_values[0], q_values[0])
 
-    tic = time.time()
-    times, mask, h_plus, h_cross = wave_gen.compute_polarizations_at_once(
-        m1,
-        m2,
-        chi1,
-        chi2,
-        distance,
-        phi_ref,
-        f_ref,
-        f_min,
-        inclination,
-        psi,
-        delta_t=delta_t,
-    )
+        tic = time.time()
+        times, mask, h_plus, h_cross = wave_gen.compute_polarizations_at_once(
+            m1,
+            m2,
+            chi1,
+            chi2,
+            distance,
+            phi_ref,
+            f_ref,
+            f_min,
+            inclination,
+            psi,
+            delta_t=delta_t,
+        )
 
-    h_plus.block_until_ready()
-    toc = time.time()
-    print(f"Warmup time: {toc - tic:.2f} seconds")
+        h_plus.block_until_ready()
+        toc = time.time()
+        print(f"Warmup time: {toc - tic:.2f} seconds")
 
-    times_list = []
-    for mt in tqdm(Mt_values, desc="Total Mass"):
-        for q in tqdm(q_values, desc="Mass Ratio"):
-            m1, m2 = mt_q_to_m1_m2(mt, q)
-            elapsed_time = 0.0
-            for _ in range(N_AVG):
-                tic = time.time()
-                times, mask, h_plus, h_cross = wave_gen.compute_polarizations_at_once(
-                    m1,
-                    m2,
-                    chi1,
-                    chi2,
-                    distance,
-                    phi_ref,
-                    f_ref,
-                    f_min,
-                    inclination,
-                    psi,
-                    delta_t=delta_t,
+        times_list = []
+        merger_times = []
+        for mt in tqdm(Mt_values, desc="Total Mass"):
+            for q in tqdm(q_values, desc="Mass Ratio"):
+                m1, m2 = mt_q_to_m1_m2(mt, q)
+                elapsed_time = 0.0
+                for _ in range(N_AVG):
+                    tic = time.time()
+                    times, mask, h_plus, h_cross = wave_gen.compute_polarizations_at_once(
+                        m1,
+                        m2,
+                        chi1,
+                        chi2,
+                        distance,
+                        phi_ref,
+                        f_ref,
+                        f_min,
+                        inclination,
+                        psi,
+                        delta_t=delta_t,
+                    )
+                    h_plus.block_until_ready()
+                    toc = time.time()
+                    elapsed_time += toc - tic
+                times_list.append(elapsed_time / N_AVG)
+                merger_time = -1 * times[mask][0]  # time of merger in seconds. Times are negative and 0.0 at merger
+                print(
+                    f"Mt: {mt:.2e}, q: {q:.2f}, average time: {elapsed_time / N_AVG:.2f} seconds"
                 )
-                h_plus.block_until_ready()
-                toc = time.time()
-                elapsed_time += toc - tic
-            times_list.append(elapsed_time / N_AVG)
-            print(
-                f"Mt: {mt:.2e}, q: {q:.2f}, average time: {elapsed_time / N_AVG:.2f} seconds"
-            )
-
-    plot_Mq_times(Mt_values, q_values, times_list)
+                if q == 1.0:  # only store merger times for equal mass case to avoid redundancy
+                    print(f"Mt: {mt:.2e}, q: {q:.2f}, merger time: {merger_time:.2f} seconds")
+                    merger_times.append(merger_time)
+        plot_Mq_times(Mt_values, q_values, merger_times, times_list)
 
     # ------
     # Now do the same for different batch sizes, fixing Mt and q
-    mt = 1e6
-    q = 0.7
-    m1, m2 = mt_q_to_m1_m2(mt, q)
+    if PLOT_BATCH:
 
-    warmup_batch_times = []
-    batch_times = []
-    key = jax.random.PRNGKey(0)
-
-    for batch_size in batch_sizes:
-        (
-            key,
-            m1_batch,
-            m2_batch,
-            chi1_batch,
-            chi2_batch,
-            distance_batch,
-            phi_ref_batch,
-            inclination_batch,
-            psi_batch,
-        ) = fill_batch_arrays(
-            batch_size, key, m1, m2, chi1, chi2, distance, phi_ref, inclination, psi
+        wave_gen = IMRPhenomTHM(
+            higher_modes="all",
+            include_negative_modes=True,  # negative m modes will be produced by simmetry
+            t_low_fit=tlowfit,
+            coarse_grain=False,  # if false it will generate the waveform on a dense time grid with the specified timestep
+            atol=tol,
+            rtol=tol,
+            T=Tobs_batch,
         )
+        
+        mt = 1e6
+        q = 0.7
+        m1, m2 = mt_q_to_m1_m2(mt, q)
 
-        tic = time.time()
-        times, mask, h_plus_batch, h_cross_batch = (
-            wave_gen.compute_polarizations_at_once(
-                m1_batch,
-                m2_batch,
-                chi1_batch,
-                chi2_batch,
-                distance_batch,
-                phi_ref_batch,
-                f_ref,
-                f_min,
-                inclination_batch,
-                psi_batch,
-                delta_t=delta_t,
-            )
-        )
-        h_plus_batch.block_until_ready()
-        toc = time.time()
-        warmup_batch_times.append(toc - tic)
-        print(f"Batch size: {batch_size}, warmup time: {toc - tic:.2f} seconds")
+        warmup_batch_times = []
+        batch_times = []
+        key = jax.random.PRNGKey(0)
 
-        # ---- Now do the actual timing with multiple runs for averaging
-        elapsed_time = 0.0
-        for _ in range(N_AVG):
+        for batch_size in batch_sizes:
             (
                 key,
                 m1_batch,
@@ -281,11 +293,49 @@ if __name__ == "__main__":
             )
             h_plus_batch.block_until_ready()
             toc = time.time()
-            elapsed_time += toc - tic
-        batch_times.append(elapsed_time / N_AVG)
-        print(
-            f"Batch size: {batch_size}, average time: {elapsed_time / N_AVG:.2f} seconds"
-        )
+            warmup_batch_times.append(toc - tic)
+            print(f"Batch size: {batch_size}, warmup time: {toc - tic:.2f} seconds")
 
-    plot_batch_times(batch_sizes, batch_times, warmup_batch_times)
+            # ---- Now do the actual timing with multiple runs for averaging
+            elapsed_time = 0.0
+            for _ in range(N_AVG):
+                (
+                    key,
+                    m1_batch,
+                    m2_batch,
+                    chi1_batch,
+                    chi2_batch,
+                    distance_batch,
+                    phi_ref_batch,
+                    inclination_batch,
+                    psi_batch,
+                ) = fill_batch_arrays(
+                    batch_size, key, m1, m2, chi1, chi2, distance, phi_ref, inclination, psi
+                )
+
+                tic = time.time()
+                times, mask, h_plus_batch, h_cross_batch = (
+                    wave_gen.compute_polarizations_at_once(
+                        m1_batch,
+                        m2_batch,
+                        chi1_batch,
+                        chi2_batch,
+                        distance_batch,
+                        phi_ref_batch,
+                        f_ref,
+                        f_min,
+                        inclination_batch,
+                        psi_batch,
+                        delta_t=delta_t,
+                    )
+                )
+                h_plus_batch.block_until_ready()
+                toc = time.time()
+                elapsed_time += toc - tic
+            batch_times.append(elapsed_time / N_AVG)
+            print(
+                f"Batch size: {batch_size}, average time: {elapsed_time / N_AVG:.2f} seconds"
+            )
+
+        plot_batch_times(batch_sizes, batch_times, warmup_batch_times)
     print("Done!")
