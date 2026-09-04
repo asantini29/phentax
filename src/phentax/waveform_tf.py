@@ -1037,8 +1037,6 @@ class IMRPhenomTHM_TF:
 
         Parameters
         ----------
-        Parameters
-        ----------
         m1 : float | Array
             Mass of the first black hole in solar masses.
         m2 : float | Array
@@ -2187,7 +2185,7 @@ class IMRPhenomTHM_TF:
         
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
-    @jax.jit(static_argnums=[0,15,16,17,18])
+    @jax.jit(static_argnums=[0,14,15,16])
     def get_tf_fresnel_tukey_midpoint(self,
                                 time_grid: Array,
                                 frequency_grid: Array,
@@ -2201,20 +2199,70 @@ class IMRPhenomTHM_TF:
                                 f_min: float | Array,
                                 inclination: float | Array,
                                 psi: float | Array,
-                                delta_t: float = 15.0,
                                 t_min: float = jnp.nan,
                                 t_ref: float = jnp.nan,
                                 closest_f_bins: int = 10,
                                 tukey_alpha: float = 0.5,
-                                time_of_projections : float | Array = 0.0,
                             ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
 
         """
-        Implementation of time-frequency Fresnel waveform generation.
+        Implementation of time-frequency Fresnel waveform generation. Accounting for the frequency domain correction from the tukey window.
+        Returns the source-frame polarizations, no detector applied.
 
-        Waveforms are defined with respect to the centre of the time-segments, and the tukey correction is analytically taken into account. 
+        Waveforms are defined with respect to the centre of the time-segments, and the tukey correction is analytically taken into account.
 
-        Everything aligning at merger. 
+        Everything aligning at merger: the time grid is internally shifted so that the longest waveform in the batch starts at its own
+        t_min, and every source is evaluated at its time-to-merger.
+
+        Parameters
+        ----------
+        time_grid : Array
+            Time grid over which to compute the waveform, shape (n_times,). Units: seconds.
+            Note: These are the segment *edges*, so the output carries n_times - 1 tranches.
+        frequency_grid : Array
+            Frequency grid over which to compute the waveform, shape (n_freq,). Units: Hz.
+        m1 : float | Array
+            Mass of the primary object, shape (num_sources,). Units: solar masses.
+        m2 : float | Array
+            Mass of the secondary object, shape (num_sources,). Units: solar masses.
+        chi1z : float | Array
+            Dimensionless spin of the primary object along the orbital angular momentum, shape (num_sources,).
+        chi2z : float | Array
+            Dimensionless spin of the secondary object along the orbital angular momentum, shape (num_sources,).
+        distance : float | Array
+            Luminosity distance to the source, shape (num_sources,). Units: Mpc.
+        phi_ref : float | Array
+            Reference phase of the waveform, shape (num_sources,). Units: radians.
+        f_ref : float | Array
+            Reference frequency at which phi_ref is defined. Units: Hz.
+            Ignored if t_ref is supplied.
+        f_min : float | Array
+            Minimum frequency, sets the start time of the waveform. Units: Hz.
+            Ignored if t_min is supplied.
+        inclination : float | Array
+            Inclination angle of the binary's orbital plane, shape (num_sources,). Units: radians.
+        psi : float | Array
+            Polarization angle of the waveform, shape (num_sources,). Units: radians.
+        t_min : float, optional
+            Start time of the waveform relative to merger, by default NaN. Units: seconds.
+            If NaN, set by f_min instead.
+        t_ref : float, optional
+            Reference time at which phi_ref is defined, relative to merger, by default NaN. Units: seconds.
+            If NaN, set by f_ref instead.
+        closest_f_bins : int, optional
+            Number of frequency bins to consider around the closest frequency for each source and mode, by default 10.
+        tukey_alpha : float, optional
+            Alpha parameter for the Tukey window, by default 0.5.
+        time_of_projections : float | Array, optional
+            Currently unused, kept for signature compatibility with
+            :meth:`get_tf_fresnel_tukey_midpoint_response`.
+
+        Returns
+        -------
+        tf_grid_plus : Array
+            Time-frequency grid of the plus polarization, shape (num_sources, num_tranches, n_freq). Units: strain.
+        tf_grid_cross : Array
+            Time-frequency grid of the cross polarization, shape (num_sources, num_tranches, n_freq). Units: strain.
         """
 
         num_sources = jnp.atleast_1d(m1).shape[0]
@@ -2233,7 +2281,7 @@ class IMRPhenomTHM_TF:
                         f_min,
                         inclination,
                         psi,
-                        delta_t,
+                        1, #delta_t, in time-domain this is the sampling cadence, in the TF domain this simply acts as a shift to the start time of the waveform, it acts as "setting the waveform start time to a multiple of delta_t" so delta_t=1 is safe. 
                         t_min,
                         t_ref,
                     )
@@ -2383,8 +2431,11 @@ class IMRPhenomTHM_TF:
         alpha_offset = 1/(tukey_alpha*dT)
 
         def scan_step(_, scan_inputs):
-            t_0, t_1, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices = scan_inputs
+            t_0, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices = scan_inputs
 
+        
+            # Rejigged efficient vectorized version of the fresnel integral with tukey window:
+            # Prefactor for the whole integral, applies to all the terms. 
             h_prefactor = (
                 Amps[:, :, jnp.newaxis]
                 * jnp.exp(1j * Phases[:, :, jnp.newaxis])
@@ -2392,112 +2443,64 @@ class IMRPhenomTHM_TF:
                 * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
             )
 
-            normal_phase_prefactor = jnp.exp(-1j*jnp.pi*((f_0[:, :, jnp.newaxis] - frequencies)**2)/f_dot[:, :, jnp.newaxis])
-            
+            # Precomputing phase prefactors used a few times. 
+            normal_phase_prefactor = jnp.exp(-1j*jnp.pi*((f_0[:, :, jnp.newaxis] - frequencies)**2)/f_dot[:, :, jnp.newaxis]) # Phase factor for the flat part
 
-            #--------- roll-on ---------# tau in [-dT/2, 1/2(-dT+alpha*dT)]
-            tau_lo = -0.5*dT
-            tau_hi = 0.5*(-dT + tukey_alpha*dT)
-
-            # 1/2* (constant 1) part 
-            v_nm_end = v_new(f_dot, tau_hi, frequencies, f_0)
-            v_nm_begin = v_new(f_dot, tau_lo, frequencies, f_0)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
-            I = C_vn_end - C_vn_begin + 1j * (S_vn_end - S_vn_begin)
-
-            # 1/2 here comes from the tukey window prefactor 
-            h_flat_roll_on = 0.5 * normal_phase_prefactor * I
-
-
-            # Now the 1/2*cos(..) part 
-            phase_prefactor_plus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis]-frequencies+alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-
-            prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
-
-            v_nm_end_plus = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
-            v_nm_begin_plus = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-
-            h_roll_on_positive = prefactor/4*phase_prefactor_plus*I        
-
-
-            prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(1/2-tukey_alpha/2))
-
+            # Phase factors for the positive and negative alpha offsets to the tukey-fresnel integral terms 
             phase_prefactor_minus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-
-            v_nm_end_minus = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
-            v_nm_begin_minus = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-
-            h_roll_on_negative = prefactor/4*phase_prefactor_minus*I
-
-            #--------- middle -----------$ tau in [1/2(-dT+alpha*dT), 1/2(dT-alpha*dT)]
-            # Mid: Bit where the window is completely flat, w(t) = 1, so just normal fresnel integral between different limits
-            tau_lo = 0.5*(-dT + tukey_alpha*dT)
-            tau_hi = 0.5*(dT - tukey_alpha*dT)
+            phase_prefactor_plus = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies + alpha_offset)**2/f_dot[:, :, jnp.newaxis])
 
 
-            # Normal fresnel evaluated with different limits
-            v_nm_end_mid = v_new(f_dot,tau_hi,frequencies,f_0)
-            v_nm_begin_mid = v_new(f_dot,tau_lo,frequencies,f_0)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_mid)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_mid)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+            # Times at which to evaluate arguments of the fresnel terms within the SFT segment.
+            # These are just the key times within an SFT segment with a tukey window applied. 
+            tau0 = -0.5*dT
+            tau1 = 0.5*(-dT + tukey_alpha*dT)
+            tau2 = 0.5*(dT - tukey_alpha*dT)
+            tau3 = 0.5*dT
 
-            h_mid = normal_phase_prefactor*I
+            # All the fresnel arguments. 
+            args = jnp.stack(
+                        [v_new(f_dot, t, frequencies, f_0)                  for t in (tau0, tau1, tau2, tau3)] # Arguments for flat parts
+                        + [v_tukey(f_dot, t, frequencies, f_0,  alpha_offset) for t in (tau0, tau1, tau2, tau3)] # Arguments for roll-on/roll-off parts (positive offset integrals)
+                        + [v_tukey(f_dot, t, frequencies, f_0, -alpha_offset) for t in (tau0, tau1, tau2, tau3)] # Arguments for roll-on/roll-off parts (negative offset integrals) 
+                )                                                       # (12, num_sources, n_modes, n_bins)
 
-            #--------- roll-off ---------# tau in [1/2(dT-alpha*dT), dT/2]  
-            tau_lo = 0.5*(dT - tukey_alpha*dT)
-            tau_hi = 0.5*dT
+            S, C = jax.scipy.special.fresnel(args)
 
-            # First of all the 1/2(1) part : Normal fresnel evaluated between different limits
+            F = C + 1j * S
 
-            v_nm_end_roll_off = v_new(f_dot,tau_hi,frequencies,f_0)
-            v_nm_begin_roll_off = v_new(f_dot,tau_lo,frequencies,f_0)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_roll_off)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_roll_off)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
-
-            h_roll_off_flat = 1/2*normal_phase_prefactor*I
-
-            # 1/2 here comes from the tukey window
-
-            # Then the 1/2*(cos(...)) part
-
-            phase_prefactor_plus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies + alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-            phase_prefactor_minus_roll_off = jnp.exp(-1j*jnp.pi*(f_0[:, :, jnp.newaxis] - frequencies - alpha_offset)**2/f_dot[:, :, jnp.newaxis])
-
-            v_nm_end_plus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,alpha_offset)
-            v_nm_begin_plus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,alpha_offset)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_plus_roll_off)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_plus_roll_off)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+            # Unpack fresnel terms 
+            flat_t0,  flat_t1,  flat_t2,  flat_t3  = F[0],  F[1],  F[2],  F[3] 
+            plus_t0,  plus_t1,  plus_t2,  plus_t3  = F[4],  F[5],  F[6],  F[7]
+            minus_t0, minus_t1, minus_t2, minus_t3 = F[8],  F[9],  F[10], F[11]
 
 
-            prefactor = jnp.exp(2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
+            W = jnp.exp(2j * jnp.pi / tukey_alpha * (0.5 - tukey_alpha / 2))
+            W_conj = jnp.conj(W)
 
+            # The subtraction is simply the fresnel term evaluated at the upper limit minus the fresnel term evaluated at the lower limit, for each of the three pieces of the integral.
             
-            # Need to careful evaluate the roll on and roll off limits 
-            h_roll_off_positive = prefactor/4*phase_prefactor_plus_roll_off*I
+            # Roll on terms
+            h_flat_roll_on      = 0.5 * normal_phase_prefactor * (flat_t1  - flat_t0)
+            h_roll_on_positive  = W      / 4 * phase_prefactor_plus  * (plus_t1  - plus_t0)
+            h_roll_on_negative  = W_conj / 4 * phase_prefactor_minus * (minus_t1 - minus_t0)
 
-            v_nm_end_minus_roll_off = v_tukey(f_dot,tau_hi,frequencies,f_0,-alpha_offset)
-            v_nm_begin_minus_roll_off = v_tukey(f_dot,tau_lo,frequencies,f_0,-alpha_offset)
-            S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end_minus_roll_off)
-            S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin_minus_roll_off)
-            I = C_vn_end - C_vn_begin + 1j*(S_vn_end - S_vn_begin)
+            # Flat middle. 
+            h_mid               =       normal_phase_prefactor * (flat_t2  - flat_t1)
 
-            prefactor = jnp.exp(-2*jnp.pi*1j/tukey_alpha*(-1/2+tukey_alpha/2))
-
-            h_roll_off_negative = prefactor/4*phase_prefactor_minus_roll_off*I
+            # Roll off terms
+            h_roll_off_flat     = 0.5 * normal_phase_prefactor * (flat_t3  - flat_t2)
+            h_roll_off_positive = W_conj / 4 * phase_prefactor_plus  * (plus_t3  - plus_t2)
+            h_roll_off_negative = W      / 4 * phase_prefactor_minus * (minus_t3 - minus_t2)
 
             # Sum the three pieces to get the full integral with the tukey window taken into account.
-            h_overall = h_prefactor * (h_flat_roll_on + h_roll_on_positive + h_roll_on_negative + h_mid + h_roll_off_flat + h_roll_off_positive + h_roll_off_negative)
-
+            h_overall =(h_prefactor * (h_flat_roll_on + 
+                                        h_roll_on_positive + 
+                                        h_roll_on_negative + 
+                                        h_mid + 
+                                        h_roll_off_flat + 
+                                        h_roll_off_positive + 
+                                        h_roll_off_negative))
             return None, (h_overall, frequency_indices)
 
         _, (waveform_steps, frequency_indices_steps) = jax.lax.scan(
@@ -2505,7 +2508,6 @@ class IMRPhenomTHM_TF:
             None,
             (
                 t0_all,
-                t1_all,
                 tmid_all,
                 amps_all,
                 phases_all,
@@ -2621,6 +2623,21 @@ class IMRPhenomTHM_TF:
                              channels: str = "AET"):
         """
         Setup STFT response within the waveform generator for now, hacky method, will be cleaned up later. 
+        Loads response through 'LISA_response' from https://github.com/dig07/LISA_response_JAX. 
+        Temporary development response code, will be cleaned up later.
+
+        Parameters
+        ----------
+        orbit_path : str
+            Path to the orbit file for LISA response.
+        STFT_times : jnp.array
+            Array of times at which to compute the STFT response.
+        modes : list, optional
+            List of modes to include in the response, by default ["22", "21", "33", "44", "55"].
+        channels : str, optional
+            Channels to include in the response, by default "AET".
+
+
         """
         # Import FD and STFT response code. 
         import LISA_response
@@ -2634,7 +2651,7 @@ class IMRPhenomTHM_TF:
                                                 channels = channels)
 
 
-    @jax.jit(static_argnums=[0,13,14,15,16])
+    @jax.jit(static_argnums=[0,13,14,15])
     def get_tf_fresnel_tukey_midpoint_response(self,
                                     time_grid: Array,
                                     frequency_grid: Array,
@@ -2648,7 +2665,6 @@ class IMRPhenomTHM_TF:
                                     psi: float | Array,
                                     latitude: float | Array,
                                     longitude: float | Array,
-                                    delta_t: float = 15.0,
                                     closest_f_bins: int = 10,
                                     tukey_alpha: float = 0.5,
                                     time_of_projections : float  = 0.0,
@@ -2656,11 +2672,51 @@ class IMRPhenomTHM_TF:
                                 ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
     
             """
-            Implementation of time-frequency Fresnel waveform generation.
-    
-            Waveforms are defined with respect to the centre of the time-segments, and the tukey correction is analytically taken into account. 
-    
-            Everything aligning at merger. 
+            Implementation of time-frequency Fresnel waveform generation. Accounting for the frequency domain correction from the tukey window.
+            Includes the effect of the detector, via LISA_response package. 
+
+            Parameters
+            ----------
+            time_grid : Array
+                Time grid over which to compute the waveform, shape (n_times,). Units: seconds. 
+                Note: Absolute time grid, not relative to merger. 
+            frequency_grid : Array
+                Frequency grid over which to compute the waveform, shape (n_freq,). Units: Hz.
+            m1 : float | Array
+                Mass of the primary object, shape (num_sources,). Units: solar masses.
+            m2 : float | Array
+                Mass of the secondary object, shape (num_sources,). Units: solar masses.
+            chi1z : float | Array
+                Dimensionless spin of the primary object along the orbital angular momentum, shape (num_sources,).
+            chi2z : float | Array
+                Dimensionless spin of the secondary object along the orbital angular momentum, shape (num_sources,).
+            distance : float | Array
+                Luminosity distance to the source, shape (num_sources,). Units: Mpc.
+            phi_ref : float | Array
+                Reference phase of the waveform, shape (num_sources,). Units: radians.
+            inclination : float | Array
+                Inclination angle of the binary's orbital plane, shape (num_sources,). Units: radians.
+            psi : float | Array
+                Polarization angle of the waveform, shape (num_sources,). Units: radians.
+            latitude : float | Array
+                Latitude of the source in the sky, shape (num_sources,). Units: radians.
+            longitude : float | Array
+                Longitude of the source in the sky, shape (num_sources,). Units: radians.
+            closest_f_bins : int, optional
+                Number of frequency bins to consider around the closest frequency for each source and mode, by default 10.
+            tukey_alpha : float, optional
+                Alpha parameter for the Tukey window, by default 0.5.
+            time_of_projections : float, optional
+                Time at which the projections are made, by default 0.0. Units: seconds
+                Note: Absolute time not relative to merger. 
+            time_of_mergers : float | Array, optional
+                Time of merger for each source, shape (num_sources,), by default 0.0. Units: seconds.
+                Note: Absolute time not relative to merger. 
+                
+            Returns
+            -------
+            tf_grid_channels: Array
+                Time-frequency grid for each channel, shape (num_tranches, num_sources, num_channels, n_freq) Units: strain.
             """
 
             # Negative, seconds units, longest time for the waveforms to start from.
@@ -2673,8 +2729,6 @@ class IMRPhenomTHM_TF:
     
             # t_ref internally set to 0, as we are aligning everything at merger, externally at least. 
             t_ref = 0 
-
-            # print('t_ref: ',t_ref)
 
             num_sources = jnp.atleast_1d(m1).shape[0]
     
@@ -2690,7 +2744,7 @@ class IMRPhenomTHM_TF:
                             1.e-4,#f_min
                             inclination,
                             psi,# polarization 
-                            delta_t,
+                            1, #delta_t, in time-domain this is the sampling cadence, in the TF domain this simply acts as a shift to the start time of the waveform, it acts as "setting the waveform start time to a multiple of delta_t" so delta_t=1 is safe. 
                             t_min,
                             t_ref,
                         )
@@ -2876,7 +2930,6 @@ class IMRPhenomTHM_TF:
                 t_0,t_index, t_midpoint, Amps, Phases, f_0, f_dot, frequencies, frequency_indices, valid = scan_inputs
 
                 # Rejigged efficient vectorized version of the fresnel integral with tukey window:
-
                 # Prefactor for the whole integral, applies to all the terms. 
                 h_prefactor = (
                     Amps[:, :, jnp.newaxis]
@@ -2964,7 +3017,7 @@ class IMRPhenomTHM_TF:
                 # Inside the segment the mode sweeps [f_0 - f_dot*dT/2, f_0 + f_dot*dT/2]. 
                 # In this region the transfer function is evaluated at the bin frequencies as usual. 
                 
-                # Remember, midpoint fresnel so we are expanding in both directions to find f0 and f1. 
+                # Midpoint fresnel so we are expanding in both directions to find f0 and f1. 
                 f_sweep_lo = f_0 - 0.5 * f_dot * dT   # (num_sources, n_modes)
                 f_sweep_hi = f_0 + 0.5 * f_dot * dT
                 response_freqs = jnp.clip(
