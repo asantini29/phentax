@@ -2651,7 +2651,7 @@ class IMRPhenomTHM_TF:
                                                 channels = channels)
 
 
-    @jax.jit(static_argnums=[0,13,14,15])
+    @jax.jit(static_argnums=[0,13,14])
     def get_tf_fresnel_tukey_midpoint_response(self,
                                     time_grid: Array,
                                     frequency_grid: Array,
@@ -2667,8 +2667,9 @@ class IMRPhenomTHM_TF:
                                     longitude: float | Array,
                                     closest_f_bins: int = 10,
                                     tukey_alpha: float = 0.5,
-                                    time_of_projections : float  = 0.0,
+                                    time_of_projections : float  = 0.0, # this 
                                     time_of_mergers: float | Array = 0.0,
+                                    segment_start_index: int = 0,
                                 ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
     
             """
@@ -2712,6 +2713,11 @@ class IMRPhenomTHM_TF:
             time_of_mergers : float | Array, optional
                 Time of merger for each source, shape (num_sources,), by default 0.0. Units: seconds.
                 Note: Absolute time not relative to merger. 
+            segment_start_index: int, optional (defaults to 0 )
+                Where the first segment falls on the full_t_grid over which the response is built. 
+                This is used to determine the range of time indices to consider when computing the response.
+                NOTE: This is *ONLY* relevant for the response function, as it tells the response function where the spacecrafts orbital quantities are at a given time. 
+                NOTE: If not supplied, the default behaviour assumes the response has been built over the t_grid as well and thus applies a 0 offset through this index. 
                 
             Returns
             -------
@@ -2760,10 +2766,11 @@ class IMRPhenomTHM_TF:
             # time_grid and time_of_mergers are on the same absolute observation clock (grid starts
             # at time_of_projections), so the epoch cancels here; it only enters via t_min above.
 
+            # Time of each midpoint relative to the merger of each source, shape (num_sources, n_mid). Negative before merger.
+            # Seconds
             t_mid_merger = (
                 t_grid_midpoints[None, :] - jnp.atleast_1d(time_of_mergers)[:, None]
-            )  # (num_sources, n_mid), seconds, negative pre-merger
-            # print('t_mid_merger: ',t_mid_merger)
+            )  # (num_sources, n_mid), seconds, negative pre-merger 
 
             # Convert to mass units per source for the amp/phase and f,fdot evaluations.
             t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(0, 0))(
@@ -2815,12 +2822,17 @@ class IMRPhenomTHM_TF:
     
             # Frequency grid spacing (assumed uniform)
             dF = frequency_grid[1] - frequency_grid[0]
-    
+
             # Build per-step inputs and scan over time tranches to keep the loop JAX-native.
             t0_all = time_grid[:-1] # Beginning times for all the tranches (Physical units, seconds)
             t1_all = time_grid[1:] # Ending times for all the tranches (Physical units, seconds)
 
-            t_indices = jnp.arange(t0_all.shape[0]) # Indices for time tranches
+
+            # ---------------- RESPONSE INDICES ----------------# 
+            # Note this is *only* used to tell the response function where the space craft are at a given time. 
+            # segment start index defaults to zero but can be set to a non-zero value if the time grid is a subset of a larger time grid for which the response has been precomputed.
+            t_indices = jnp.arange(t0_all.shape[0])+segment_start_index  # Default: response built for the whole time grid, no slicing
+            # ---------------- RESPONSE INDICES ----------------# 
 
             tmid_all = t_grid_midpoints # Midpoint times for all the tranches (Physical units, seconds)
     
