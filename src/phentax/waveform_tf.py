@@ -199,40 +199,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             
         return(phase_coeffs,amplitude_coeffs)
 
-    @jax.jit(static_argnames="self")
-    def rotate_by_polarization_angle(
-        self,
-        h_plus: Array,
-        h_cross: Array,
-        psi: float | Array,
-    ) -> tuple[Array, Array]:
-        """
-        Rotate the plus and cross polarizations by the polarization angle :math:`\\psi`.
-
-        Parameters
-        ----------
-        h_plus : Array
-            Plus polarization strain.
-        h_cross : Array
-            Cross polarization strain.
-        psi : float | Array
-            Polarization angle in radians.
-
-        Returns
-        -------
-        h_plus_rotated : Array
-            Rotated plus polarization strain.
-        h_cross_rotated : Array
-            Rotated cross polarization strain.
-        """
-        cos_2psi = jnp.cos(2.0 * psi)
-        sin_2psi = jnp.sin(2.0 * psi)
-
-        h_plus_rotated = h_plus * cos_2psi - h_cross * sin_2psi
-        h_cross_rotated = h_plus * sin_2psi + h_cross * cos_2psi
-
-        return h_plus_rotated, h_cross_rotated
-
     @jax.jit(static_argnums=[0,16])
     def get_tf_fresnel_waveform_vanilla_TF(self,
                                 time_grid: Array,
