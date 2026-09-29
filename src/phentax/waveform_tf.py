@@ -221,19 +221,75 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
                             ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
 
         """
-        Implementation of time-frequency Fresnel waveform generation.
+        Simplest implementation of time-frequency Fresnel waveform generation.
 
         Assumes box-car window, and that the waveform parameters are defined at the beginning of each segment.
         
         Note: This function uses an un-optimized version of the fresnel kernel, but it is much more readable than the optimized version, so it is being kept in for now. 
 
-        Everything aligning at merger. 
+        Time convention:
+            - It is assumed that t_grid supplied by the user is long-enough to include the longest waveform in the batch.
+            - Time grid is internally shifted so that the longest waveform in the batch starts at its own t_min (in physical time).
+            - t(f_min) is computed for each source and used to project the waveform.
+
+        Parameters
+        ----------
+        time_grid : Array
+            Time grid over which to compute the waveform, shape (n_times,). Units: seconds.
+            Note: These are the segment *edges*, relative to the start of the longest waveform in the batch.
+        frequency_grid : Array
+            Frequency grid over which to compute the waveform, shape (n_freq,). Units: Hz.
+            Must be uniformly spaced.
+        m1 : float | Array
+            Mass of the primary object, shape (num_sources,). Units: solar masses.
+        m2 : float | Array
+            Mass of the secondary object, shape (num_sources,). Units: solar masses.
+        chi1z : float | Array
+            Dimensionless spin of the primary object along the orbital angular momentum, shape (num_sources,).
+        chi2z : float | Array
+            Dimensionless spin of the secondary object along the orbital angular momentum, shape (num_sources,).
+        distance : float | Array
+            Luminosity distance to the source, shape (num_sources,). Units: Mpc.
+        phi_ref : float | Array
+            Reference phase of the waveform, shape (num_sources,). Units: radians.
+        f_ref : float | Array
+            Reference frequency at which phi_ref is defined. Units: Hz.
+            Ignored if t_ref is supplied.
+        f_min : float | Array
+            Minimum frequency, sets the start time of the waveform. Units: Hz.
+            Ignored if t_min is supplied.
+        inclination : float | Array
+            Inclination angle of the binary's orbital plane, shape (num_sources,). Units: radians.
+        psi : float | Array
+            Polarization angle of the waveform, shape (num_sources,). Units: radians.
+        delta_t : float, optional
+            Time step, by default 15.0. Units: seconds.
+            Only rounds the start time t_min to a multiple of delta_t; it does not set any sampling.
+        t_min : float, optional
+            Start time of the waveform relative to merger, by default NaN. Units: seconds.
+            If NaN, set by f_min instead.
+        t_ref : float, optional
+            Reference time at which phi_ref is defined, relative to merger, by default NaN. Units: seconds.
+            If NaN, set by f_ref instead.
+        closest_f_bins : int, optional
+            Number of frequency bins to consider around the closest frequency for each source and mode, by default 10.
+        time_of_projections : float | Array, optional
+            Currently unused.
+
+        Returns
+        -------
+        tf_grid_plus : Array
+            Time-frequency grid of the plus polarization, shape (num_sources, n_times, n_freq). Units: strain.
+            Row i is the segment [time_grid[i], time_grid[i+1]]; the last row is always zero.
+        tf_grid_cross : Array
+            Time-frequency grid of the cross polarization, shape (num_sources, n_times, n_freq). Units: strain.
+            Row i is the segment [time_grid[i], time_grid[i+1]]; the last row is always zero.
         """
 
         num_sources = jnp.atleast_1d(m1).shape[0]
 
         # print("Number of sources: ", num_sources)
-        # Ignore times for now 
+        # Ignore times for now
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = (
                     self.initial_processing_TF(
                         m1,
@@ -548,7 +604,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         
         return(tf_grid_plus, tf_grid_cross) #Each (time_grid, frequency_grid, tf_grid) # Returning the full TF grid for all sources.
 
-    @jax.jit(static_argnums=[0,14,15,16])
+    @jax.jit(static_argnums=[0,15,16])
     def get_tf_fresnel_tukey_midpoint(self,
                                 time_grid: Array,
                                 frequency_grid: Array,
@@ -573,17 +629,21 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         Returns the source-frame polarizations, no detector applied.
 
         Waveforms are defined with respect to the centre of the time-segments, and the tukey correction is analytically taken into account.
-
-        Everything aligning at merger: the time grid is internally shifted so that the longest waveform in the batch starts at its own
-        t_min, and every source is evaluated at its time-to-merger.
+        
+        Time convention: 
+            - It is assumed that t_grid supplied by the user is long-enough to include the longest waveform in the batch. 
+            - Time grid is internally shifted so that the longest waveform in the batch starts at its own t_min (in physical time). 
+            - t(f_min) is computed for each source and used to project the waveform.
 
         Parameters
         ----------
         time_grid : Array
             Time grid over which to compute the waveform, shape (n_times,). Units: seconds.
-            Note: These are the segment *edges*, so the output carries n_times - 1 tranches.
+            Note: These are the segment *edges*, relative to the start of the longest waveform in the batch,
+            so the output carries n_times - 1 tranches. Must be uniformly spaced.
         frequency_grid : Array
             Frequency grid over which to compute the waveform, shape (n_freq,). Units: Hz.
+            Must be uniformly spaced.
         m1 : float | Array
             Mass of the primary object, shape (num_sources,). Units: solar masses.
         m2 : float | Array
@@ -616,9 +676,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             Number of frequency bins to consider around the closest frequency for each source and mode, by default 10.
         tukey_alpha : float, optional
             Alpha parameter for the Tukey window, by default 0.5.
-        time_of_projections : float | Array, optional
-            Currently unused, kept for signature compatibility with
-            :meth:`get_tf_fresnel_tukey_midpoint_response`.
 
         Returns
         -------
@@ -1377,7 +1434,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
                                            h_roll_off_negative))
 
 
-                #-------- RESPONSE ---------# (messy as hell for now, I am sorry)
+                #-------- RESPONSE ---------#  
 
                 # One SFT segment at a time: compute the transfer functions for all sources and modes,
                 # multiply straight onto h_overall, and scatter onto the full frequency grid, so the
