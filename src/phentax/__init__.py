@@ -10,15 +10,12 @@ generation for compact binary coalescences using JAX.
 from importlib.metadata import PackageNotFoundError, version
 
 # Data structures
-from . import core, utils, waveform
+from . import core, utils, waveform, waveform_tf
 
 # from .utils.config import configure_jax
 
 # # Configure JAX for float64 by default
 # configure_jax()
-
-# Data structures
-from . import core, utils, waveform, waveform_tf
 
 __copyright__ = "2025, Alessandro Santini"
 __author__ = "Alessandro Santini"

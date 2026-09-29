@@ -31,8 +31,7 @@ from phentax.core import (
     imr_amplitude,
     imr_phase,
     imr_omega,
-    imr_omega_dot,
-    imr_amplitude_dot
+    imr_omega_dot
 )
 from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.coarse_graining import (
@@ -52,7 +51,6 @@ logger = setup_logging(__name__)
 
 ALLOWED_POSITIVE_HMS = [21, 33, 44, 55]
 
-import scipy
 from functools import partial
 
 class IMRPhenomTHM_TF(IMRPhenomTHM):
@@ -62,7 +60,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         - h_plus/h_cross in STFT domain directly in time-frequency.
             - Vanilla Fresnel representation, box-car window, waveform parameters defined at beginning of each segment. 
             - Tukey-Central Fresnel representation, Tukey window, waveform parameters defined at middle of each segment (More accurate). 
-        - AET in STFT domain directly in time-frequency. Uses a time-frequency leading order response function. 
+        - XYZ in STFT domain directly in time-frequency. Uses a time-frequency leading order (local) response function. 
     """
 
     def __init__(
@@ -70,7 +68,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         higher_modes: Optional[Array | list | str] = "all",
         include_negative_modes: bool = True,
         coarse_grain: bool = False,
-        use_splines: bool = False,
         t_low_fit: bool = True,  # Use default fit for t_low if True.
         atol: float = 1e-12,
         rtol: float = 1e-12,
@@ -80,7 +77,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             higher_modes=higher_modes,
             include_negative_modes=include_negative_modes,
             coarse_grain=coarse_grain,
-            use_splines=use_splines,
             t_low_fit=t_low_fit,
             atol=atol,
             rtol=rtol,
@@ -161,13 +157,13 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
                 chi2z,
                 distance,
                 phi_ref,
-                f_ref,
-                f_min,
                 inclination,
                 psi,
                 delta_t,
                 t_min,
                 t_ref,
+                f_min,
+                f_ref,
             )
             wf_params, amplitude_coeffs_22, phase_coeffs_22 = jax.vmap(
                 self._compute_coeffs_22
