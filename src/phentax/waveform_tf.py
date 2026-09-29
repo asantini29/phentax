@@ -212,8 +212,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
                                 delta_t: float = 15.0,
                                 t_min: float = jnp.nan,
                                 t_ref: float = jnp.nan,
-                                closest_f_bins: int = 10,
-                                time_of_projections : float | Array = 0.0,
+                                closest_f_bins: int = 10                            
                             ) -> tuple[Array, Array, Array, Array]: # Check dimensionality of this when done. 
 
         """
@@ -221,7 +220,8 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
 
         Assumes box-car window, and that the waveform parameters are defined at the beginning of each segment.
         
-        Note: This function uses an un-optimized version of the fresnel kernel, but it is much more readable than the optimized version, so it is being kept in for now. 
+        Note: This function uses an un-optimized version of the fresnel kernel, 
+            but it is much more readable than the optimized version, so it is being kept in for now for understanding. 
 
         Time convention:
             - It is assumed that t_grid supplied by the user is long-enough to include the longest waveform in the batch.
@@ -269,8 +269,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             If NaN, set by f_ref instead.
         closest_f_bins : int, optional
             Number of frequency bins to consider around the closest frequency for each source and mode, by default 10.
-        time_of_projections : float | Array, optional
-            Currently unused.
 
         Returns
         -------

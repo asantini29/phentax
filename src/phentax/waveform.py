@@ -26,8 +26,6 @@ from phentax.core import (
     compute_phase_coeffs_hm,
     imr_amplitude,
     imr_phase,
-    imr_omega,
-    imr_omega_dot,
 )
 from phentax.core.internals import WaveformParams, compute_waveform_params
 from phentax.utils.coarse_graining import (
@@ -40,7 +38,12 @@ from phentax.utils.coarse_graining import (
 )
 from phentax.utils.config import setup_logging
 from phentax.utils.constants import YRSID_SI
-from phentax.utils.utility import check_equal_bhs, mass_to_second, mode_to_lm,second_to_mass, mass_to_hz, df_dt_to_Hz_squared, is_tracing
+from phentax.utils.utility import (
+    check_equal_bhs,
+    is_tracing,
+    mass_to_second,
+    mode_to_lm,
+)
 from phentax.utils.ylm import (
     spin_weighted_spherical_harmonic,
     spin_weighted_spherical_harmonic_all_modes,
@@ -50,7 +53,6 @@ logger = setup_logging(__name__)
 
 ALLOWED_POSITIVE_HMS = [21, 33, 44, 55]
 
-import scipy
 
 class IMRPhenomTHM:
     """
@@ -338,31 +340,6 @@ class IMRPhenomTHM:
         )
 
         return amplitude_22[None, :], phase_22[None, :]
-    
-    @jax.jit(static_argnames="self")
-    def _compute_phase_coeffs_hm(
-        self,
-        mode: int | Array,
-        wf_params: WaveformParams,
-        phase_coeffs_22: PhaseCoeffs,
-    ) -> tuple[Array]:
-        """
-        Utility function to compute phase coefficients for a given higher mode (beyond 22).
-        """
-        
-        m = mode % 10
-        print('MODE GOING INTO BRANCH: ',mode)
-        amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
-        phase_coeffs = compute_phase_coeffs_hm(
-                wf_params,
-                phase_coeffs_22,
-                OmegaCutPNAMP=amplitude_coeffs.omegaCutPNAMP,
-                PhiCutPNAMP=amplitude_coeffs.phiCutPNAMP,
-                mode=mode,
-            )
-            
-    
-        return(phase_coeffs)
 
     @jax.jit(static_argnames="self")
     def _compute_amp_phase_hm(
@@ -402,6 +379,7 @@ class IMRPhenomTHM:
         """
 
         m = mode % 10
+
         amplitude_coeffs = compute_amplitude_coeffs_hm(wf_params, phase_coeffs_22, mode)
         phase_coeffs = compute_phase_coeffs_hm(
             wf_params,
@@ -507,9 +485,6 @@ class IMRPhenomTHM:
         )  # shape (Nmodes, Ntimes)
 
         return all_amplitudes, all_phases
-    
-
-    
 
     @jax.jit(static_argnames="self")
     def combine_amp_phase(self, amplitudes: Array, phases: Array) -> Array:
