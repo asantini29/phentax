@@ -1094,7 +1094,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             Implementation of time-frequency Fresnel waveform generation. Accounting for the frequency domain correction from the tukey window.
             Includes the effect of the detector, via LISA_response package. 
             
-            In development. 
+            Currently in development. 
 
             Parameters
             ----------
@@ -1550,15 +1550,113 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
 
 @jax.jit
 def v(f_dot_0,t_0,t_1,f,f_0):
+    """
+    Fresnel argument for the box-car (vanilla) kernel, with the mode expanded about the segment start t_0.
+
+    Within a segment each mode is linearised as f(t) = f_0 + f_dot_0 * (t - t_0). Completing the square in the
+    phase 2*pi*[(f_0 - f)*(t - t_0) + f_dot_0*(t - t_0)**2 / 2] gives the Fresnel argument
+
+        v = sqrt(2*f_dot_0) * ((t_1 - t_0) + (f_0 - f) / f_dot_0),
+
+    so the segment integral is C(v(t_1)) - C(v(t_0)) + i*(S(v(t_1)) - S(v(t_0))).
+    Used by `IMRPhenomTHM_TF.get_tf_fresnel_waveform_vanilla_TF`, which calls it with t_1 = t_0 for the lower limit.
+
+    Parameters
+    ----------
+    f_dot_0 : Array
+        Frequency derivative of each mode at t_0, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
+        num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
+    t_0 : float
+        Expansion time, the start of the segment. Units: seconds.
+    t_1 : float
+        Time at which the argument is evaluated, the end of the segment (or t_0 for the lower limit). Units: seconds.
+    f : Array
+        Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
+        n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
+    f_0 : Array
+        Frequency of each mode at t_0, shape (num_sources, n_modes). Units: Hz.
+
+    Returns
+    -------
+    fresnel_argument : Array
+        Dimensionless Fresnel argument, shape (num_sources, n_modes, n_bins).
+    """
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*((t_1-t_0) + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
 
 @jax.jit
 def v_tukey(f_dot_0,tau,f,f_0,alpha_term):
+    """
+    Fresnel argument for the roll-on/roll-off pieces of the Tukey-window kernel, expanded about the segment midpoint.
+
+    In the tapers the Tukey window is 1/2 * (1 - cos(2*pi*(tau - tau_edge) / (alpha*dT))). Writing the cosine as two
+    exponentials shifts the frequency of the integrand by +/- 1/(alpha*dT), so the argument is that of `v_new`
+    with f_0 - f replaced by f_0 - f + alpha_term:
+
+        v = sqrt(2*f_dot_0) * (tau + (f_0 - f + alpha_term) / f_dot_0).
+
+
+    Used by `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint` and
+    `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint_response`, evaluated at the four segment edges
+    tau0..tau3 for both signs of alpha_term. The +alpha_term results pair with phase_prefactor_plus,
+    the -alpha_term results with phase_prefactor_minus.
+
+    Parameters
+    ----------
+    f_dot_0 : Array
+        Frequency derivative of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
+        num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
+    tau : float
+        Time relative to the segment midpoint at which the argument is evaluated, one of
+        -dT/2, -dT/2*(1 - alpha), dT/2*(1 - alpha), dT/2. Units: seconds.
+    f : Array
+        Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
+        n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
+    f_0 : Array
+        Frequency of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz.
+    alpha_term : float
+        Frequency shift from the Tukey taper, +/- 1/(tukey_alpha*dT) (alpha_offset in the callers). Units: Hz.
+
+    Returns
+    -------
+    fresnel_argument : Array
+        Dimensionless Fresnel argument, shape (num_sources, n_modes, n_bins).
+    """
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*(tau + (f_0[:,:,jnp.newaxis]-f+alpha_term)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
 
 @jax.jit
 def v_new(f_dot_0,tau,f,f_0):
+    """
+    Fresnel argument for the flat (unit-weight) pieces of the Tukey-window kernel, expanded about the segment midpoint.
+
+    Within a segment each mode is linearised as f(tau) = f_0 + f_dot_0 * tau, with tau measured from the midpoint:
+
+        v = sqrt(2*f_dot_0) * (tau + (f_0 - f) / f_dot_0).
+
+    This is `v_tukey` with alpha_term = 0, and `v` with the expansion point moved from the segment
+    start to the midpoint. Used by `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint` and
+    `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint_response`, evaluated at the four segment edges tau0..tau3;
+    the results pair with normal_phase_prefactor.
+
+    Parameters
+    ----------
+    f_dot_0 : Array
+        Frequency derivative of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
+        num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
+    tau : float
+        Time relative to the segment midpoint at which the argument is evaluated, one of
+        -dT/2, -dT/2*(1 - alpha), dT/2*(1 - alpha), dT/2. Units: seconds.
+    f : Array
+        Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
+        n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
+    f_0 : Array
+        Frequency of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz.
+
+    Returns
+    -------
+    fresnel_argument : Array
+        Dimensionless Fresnel argument, shape (num_sources, n_modes, n_bins).
+    """
     fresnel_argument = jnp.sqrt(2*f_dot_0[:,:,jnp.newaxis])*(tau + (f_0[:,:,jnp.newaxis]-f)/f_dot_0[:,:,jnp.newaxis])
     return fresnel_argument
