@@ -1,0 +1,3 @@
+
+*.ipynb filter=nbstripout diff=jupyternotebook merge=jupyternotebook
+docs/*.ipynb -filter diff=jupyternotebook merge=jupyternotebook

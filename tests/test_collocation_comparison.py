@@ -1,5 +1,3 @@
-# Copyright (C) 2024 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Tests comparing pseudo-PN coefficients between phentax and phenomxpy.
 
@@ -19,7 +17,7 @@ jax.config.update("jax_enable_x64", True)
 from phenomxpy.phenomt.internals import pPhase, pWF, pWFHM
 
 # Import phentax modules
-from phentax import collocation, pn_coeffs
+from phentax.core import collocation, pn_coeffs
 
 
 def assert_close(actual, expected, rtol=1e-10, atol=1e-12, name="value"):

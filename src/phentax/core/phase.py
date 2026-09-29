@@ -149,12 +149,12 @@ class PhaseCoeffs(eqx.Module):
     c4: float | Array
     c1_prec: float | Array
 
-    # int | Arrayermediate ansatz coefficients
+    # intermediate ansatz coefficients
     omegaMergerC1: float | Array
     omegaMergerC2: float | Array
     omegaMergerC3: float | Array
 
-    # int | Arrayermediate region values
+    # intermediate region values
     omegaCut: float | Array  # omega at inspiral cut
     domegaCut: float | Array  # domega/dt at inspiral cut
     domegaPeak: float | Array  # domega/dt at peak
@@ -416,12 +416,12 @@ def compute_phase_coeffs_22(
 
     def _compute_min(_):
         return get_time_of_frequency(
-            wf_params.Mf_min,
-            wf_params.eta,
-            PhaseCoeffs22,
-            wf_params.t_low,
-            wf_params.atol,
-            wf_params.rtol,
+            freq=wf_params.Mf_min,
+            eta=wf_params.eta,
+            phase_coeffs=PhaseCoeffs22,
+            t_low=wf_params.t_low,
+            atol=wf_params.atol,
+            rtol=wf_params.rtol,
         )
 
     def _use_existing_min(_):
@@ -451,12 +451,12 @@ def compute_phase_coeffs_22(
 
     def _compute_ref(_):
         return get_time_of_frequency(
-            wf_params.Mf_ref,
-            wf_params.eta,
-            PhaseCoeffs22,
-            wf_params.t_low,
-            wf_params.atol,
-            wf_params.rtol,
+            freq=wf_params.Mf_ref,
+            eta=wf_params.eta,
+            phase_coeffs=PhaseCoeffs22,
+            t_low=wf_params.t_low,
+            atol=wf_params.atol,
+            rtol=wf_params.rtol,
         )
 
     def _use_existing_ref(_):
@@ -923,7 +923,12 @@ def get_time_of_frequency(
 
     t_low = jax.lax.cond(
         t_low == 0,
-        lambda: -0.015 * freq ** (-2.7),  # enlarging this a bit
+        # The time-frequency evolution in the Newtonian approximation changes with the chirp mass; t is
+        # proportional to M_c^(-5/3). M_c = eta^(3/5) * M, with M = m1 + m2. If we divide by eta, which
+        # is <= 1/4 by the AM-GM inequality, we get a lower t_low (since there's a negative coefficient).
+        # This can plausibly fail in certain cases when M < 1 in whatever units you use, but in most cases
+        # we will get a number low enough. You can always make the abs. value of the coefficient larger.
+        lambda: -0.015 * freq ** (-8/3) / eta,  # enlarging this a bit
         lambda: t_low,
     )
 

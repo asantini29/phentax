@@ -1,12 +1,22 @@
 # PhenTAX: a JAX Implementation of the IMRPhenomTHM waveform family
 
 [![Documentation](https://github.com/asantini29/phentax/actions/workflows/docs.yml/badge.svg)](https://asantini29.github.io/phentax/)
+[![TestPyPI](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ftest.pypi.org%2Fpypi%2Fphentax%2Fjson&query=%24.info.version&label=TestPyPI&logo=pypi)](https://test.pypi.org/project/phentax/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/asantini29/phentax/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/1116467177.svg)](https://doi.org/10.5281/zenodo.19390392)
 
 `phentax` is a JAX re-implementation of the IMRPhenomT and IMRPhenomTHM gravitational waveform models as implemented in the [`phenomxpy` package](https://gitlab.com/imrphenom-dev/phenomxpy).
 
 At present, `phentax` supports the generation of time-domain waveforms for quasi-circular, non-precessing binary black hole mergers, including higher-order modes (HMs) in the IMRPhenomTHM model. The implementation leverages JAX's capabilities for automatic differentiation, just-in-time compilation, and batching to enable efficient waveform generation and parameter estimation.
 
+## Note
+This package is currently released as a beta version, and it could still show some undesired behaviors. If you encounter any issues, please report them on the [GitHub issues tracker](https://github.com/asantini29/phentax/issues). We welcome any contribution to the codebase: if you want to contribute, please open a pull request or contact the authors directly.
+
+At present, publications using this code are discouraged until the package reaches a stable release. Please contact the authors if you want to discuss this further.
+
 ## Installation
+
+### Installation from source
 This project is managed by [uv](https://docs.astral.sh/uv/). To set up the development environment, first clone the repository:
 ```
 git clone https://github.com/asantini29/phentax
@@ -34,9 +44,32 @@ After installation, run your commands within this environment using:
 uv run <YOUR-COMMAND>
 ```
 
-## Credits
-The original `python` implementation of the IMRPhenomT(HM) waveform models in the `phenomxpy` package were developed by Cecilio García Quirós. This JAX re-implementation builds upon his work. If you use this code in your research, please cite both the original `phenomxpy` package and this `phentax` implementation:
+### Installation from Package Index
+`phentax` can also be installed directly with `pip`. Currently, the latest version is available on [TestPyPI](https://test.pypi.org/simple/). To install the latest version in your environment, run one of the following commands depending on your system configuration:
 ```
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cpu]' # For CPU-only installation
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda12]' # For GPU installation with CUDA 12.x support
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda13]' # For GPU installation with CUDA 13.x support
+```
+We still recommend installing the package in a virtual environment to avoid conflicts with other projects.
+
+## Credits
+The original `python` implementation of the IMRPhenomT(HM) waveform models in the `phenomxpy` package were developed by Cecilio García Quirós. This JAX re-implementation builds upon his work. If you use this code in your research, please cite the original IMRPhenomT(HM) paper, and both the original `phenomxpy` package and this `phentax` implementation:
+```
+@article{Estelles:2020twz,
+    author = "Estell{\'e}s, H{\'e}ctor and Husa, Sascha and Colleoni, Marta and Keitel, David and Mateu-Lucena, Maite and Garc{\'\i}a-Quir{\'o}s, Cecilio and Ramos-Buades, Antoni and Borchers, Angela",
+    title = "{Time-domain phenomenological model of gravitational-wave subdominant harmonics for quasicircular nonprecessing binary black hole coalescences}",
+    eprint = "2012.11923",
+    archivePrefix = "arXiv",
+    primaryClass = "gr-qc",
+    doi = "10.1103/PhysRevD.105.084039",
+    journal = "Phys. Rev. D",
+    volume = "105",
+    number = "8",
+    pages = "084039",
+    year = "2022"
+}
+
 @misc{garcíaquirós2025gpuacceleratedlisaparameterestimation,
       title={GPU-accelerated LISA parameter estimation with full time domain response},
       author={Cecilio García-Quirós and Shubhanshu Tiwari and Stanislav Babak},
@@ -47,3 +80,31 @@ The original `python` implementation of the IMRPhenomT(HM) waveform models in th
       url={https://arxiv.org/abs/2501.08261},
 }
 ```
+At the moment, you can cite ``phentax`` as follows:
+```
+@software{alessandro_santini_2026_19390393,
+  author       = {Alessandro Santini},
+  title        = {asantini29/phentax: Release to TestPypi and Zenodo},
+  month        = apr,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v0.1.1b2},
+  doi          = {10.5281/zenodo.19390393},
+  url          = {https://doi.org/10.5281/zenodo.19390393},
+  swhid        = {swh:1:dir:53eb9b80c35ee46f3c47856646bf2e527cc9b31c
+                   ;origin=https://doi.org/10.5281/zenodo.19390392;vi
+                   sit=swh:1:snp:491e9d7331ce8a58625a229398fc5dac141f
+                   0e16;anchor=swh:1:rel:c6c621c39a87fd9673d834d3a289
+                   bd72f71ec7e2;path=asantini29-phentax-19563e0
+                  },
+}
+```
+
+## License
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/asantini29/phentax/blob/main/LICENSE) file for details.
+
+## Contributing
+Contributions to this project are welcome! If you would like to contribute, please follow the guidelines outlined in the [CONTRIBUTING](https://github.com/asantini29/phentax/blob/main/CONTRIBUTING.md) file.
+
+## Versioning
+This project uses [Semantic Versioning](https://semver.org/). Current version: [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ftest.pypi.org%2Fpypi%2Fphentax%2Fjson&query=%24.info.version&label=Version&logo=pypi)](https://test.pypi.org/project/phentax/)

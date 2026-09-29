@@ -7,6 +7,11 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv*
+
+# docs build files
 docs/_build
 docs/_autosummary
+
+# claude
+.planning*

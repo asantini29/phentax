@@ -55,3 +55,5 @@ html_sidebars = {
         "sidebar/scroll-end.html",
     ]
 }
+nbsphinx_allow_errors = True
+nbsphinx_execute = "never"  # never re-execute notebooks during docs build

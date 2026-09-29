@@ -1,5 +1,3 @@
-# Copyright (C) 2024 Alessandro Santini
-# SPDX-License-Identifier: MIT
 """
 Tests comparing PN coefficients between phentax and phenomxpy.
 
@@ -19,7 +17,7 @@ jax.config.update("jax_enable_x64", True)
 from phenomxpy.phenomt import internals as pxpy_internals
 
 # Import phentax
-from phentax import pn_coeffs as ptax_pn
+from phentax.core import pn_coeffs as ptax_pn
 
 # =============================================================================
 # Helper functions
