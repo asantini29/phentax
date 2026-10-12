@@ -230,9 +230,20 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         Time convention:
             - It is assumed that the time_grid supplied by the user is long enough to include
               the longest waveform in the batch.
-            - The time grid is internally shifted so that the longest waveform in the batch
-              starts at its own t_min (in physical time).
-            - t(f_min) is computed for each source and used to project the waveform.
+            - The time grid is internally shifted so that grid time 0 is the start of the longest
+              waveform in the batch; every source merges at the same grid time.
+            - t(f_min) is computed for each source, but only the earliest one sets the grid start.
+
+        Note on f_min for batches:
+            Every source is evaluated from the start of the longest waveform, so for all other
+            sources the early segments have a 22-mode frequency below f_min. This is still valid
+            inspiral (t_min/f_min only set the start time, not the model coefficients), but f_min
+            is then the starting frequency of the longest source only, and a mixed batch will not
+            match the time-domain IMRPhenomTHM, which starts each source at its own t(f_min).
+            For a batch-independent start, pass a scalar t_min instead.
+
+            In comparison to "natural ground truth" which will have all the modes at all the times, 
+            this is a more natural construction. 
 
         Parameters
         ----------
@@ -258,8 +269,8 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             Reference frequency at which phi_ref is defined. Units: Hz.
             Ignored if t_ref is supplied.
         f_min : float | Array
-            Minimum frequency, sets the start time of the waveform. Units: Hz.
-            Ignored if t_min is supplied.
+            22-mode frequency at which the longest source in the batch starts (see the note
+            above). Units: Hz. Ignored if t_min is supplied.
         inclination : float | Array
             Inclination angle of the binary's orbital plane, shape (num_sources,). Units: radians.
         psi : float | Array
@@ -305,17 +316,26 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             t_ref,
         )
 
-        # Start time of every waveform in the batch, in mass units.
+        # Time (relative to merger, in mass units) at which each source's 22 mode is at
+        # f_min, shape (num_sources,). One value per source, not a batch minimum.
         min_time_M_units = wf_params.Mt_min
 
-        # Convert each start time to seconds to find the longest waveform in physical time.
-        time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
+        # Convert each start time to seconds. mass_to_second expects (n_sources, n_times)
+        # input (it broadcasts total_mass[:, None]), so add a time axis and drop it again;
+        # passing the 1D array directly gives an (n_sources, n_sources) outer product.
+        time_min_physical_all = mass_to_second(
+            min_time_M_units[:, None], wf_params.total_mass
+        )[:, 0]
 
-        # Earliest (most negative) start time in the batch, in seconds.
+        # Earliest (most negative) start time in the batch, in seconds: the start of the
+        # longest waveform, where its 22 mode is at f_min. The minimum must be taken in
+        # seconds, since mass units differ between sources.
         min_time_s_units = jnp.min(time_min_physical_all)
 
-        # Shift the time grid to be negative (relative to merger), starting at the
-        # start of the longest waveform. Units: seconds.
+        # The time grid starts at 0, and every source's merger is at t = 0, so adding
+        # min_time_s_units makes the grid relative to merger, starting at the start of the
+        # longest waveform. Units: seconds. Every other source is therefore evaluated from
+        # before its own t(f_min), i.e. below f_min (see the docstring note).
         time_grid += min_time_s_units
 
         # The same time grid in mass units, separately for each binary.
@@ -633,9 +653,17 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         Time convention:
             - It is assumed that the time_grid supplied by the user is long enough to include
               the longest waveform in the batch.
-            - The time grid is internally shifted so that the longest waveform in the batch
-              starts at its own t_min (in physical time).
-            - t(f_min) is computed for each source and used to project the waveform.
+            - The time grid is internally shifted so that grid time 0 is the start of the longest
+              waveform in the batch; every source merges at the same grid time.
+            - t(f_min) is computed for each source, but only the earliest one sets the grid start.
+
+        Note on f_min for batches:
+            Every source is evaluated from the start of the longest waveform, so for all other
+            sources the early segments have a 22-mode frequency below f_min. This is still valid
+            inspiral (t_min/f_min only set the start time, not the model coefficients), but f_min
+            is then the starting frequency of the longest source only, and a mixed batch will not
+            match the time-domain IMRPhenomTHM, which starts each source at its own t(f_min).
+            For a batch-independent start, pass a scalar t_min instead.
 
         Parameters
         ----------
@@ -662,8 +690,8 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             Reference frequency at which phi_ref is defined. Units: Hz.
             Ignored if t_ref is supplied.
         f_min : float | Array
-            Minimum frequency, sets the start time of the waveform. Units: Hz.
-            Ignored if t_min is supplied.
+            22-mode frequency at which the longest source in the batch starts (see the note
+            above). Units: Hz. Ignored if t_min is supplied.
         inclination : float | Array
             Inclination angle of the binary's orbital plane, shape (num_sources,). Units: radians.
         psi : float | Array
@@ -689,8 +717,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             Time-frequency grid of the cross polarization, shape (num_sources, n_times - 1, n_freq). Units: strain.
         """
 
-        num_sources = jnp.atleast_1d(m1).shape[0]
-
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = self.initial_processing_TF(
             m1,
             m2,
@@ -709,17 +735,26 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             t_ref,
         )
 
-        # Start time of every waveform in the batch, in mass units.
+        # Time (relative to merger, in mass units) at which each source's 22 mode is at
+        # f_min, shape (num_sources,). One value per source, not a batch minimum.
         min_time_M_units = wf_params.Mt_min
 
-        # Convert each start time to seconds to find the longest waveform in physical time.
-        time_min_physical_all = mass_to_second(min_time_M_units, wf_params.total_mass)
+        # Convert each start time to seconds. mass_to_second expects (n_sources, n_times)
+        # input (it broadcasts total_mass[:, None]), so add a time axis and drop it again;
+        # passing the 1D array directly gives an (n_sources, n_sources) outer product.
+        time_min_physical_all = mass_to_second(
+            min_time_M_units[:, None], wf_params.total_mass
+        )[:, 0]
 
-        # Earliest (most negative) start time in the batch, in seconds.
+        # Earliest (most negative) start time in the batch, in seconds: the start of the
+        # longest waveform, where its 22 mode is at f_min. The minimum must be taken in
+        # seconds, since mass units differ between sources.
         min_time_s_units = jnp.min(time_min_physical_all)
 
-        # Shift the time grid to be negative (relative to merger), starting at the
-        # start of the longest waveform. Units: seconds.
+        # The time grid starts at 0, and every source's merger is at t = 0, so adding
+        # min_time_s_units makes the grid relative to merger, starting at the start of the
+        # longest waveform. Units: seconds. Every other source is therefore evaluated from
+        # before its own t(f_min), i.e. below f_min (see the docstring note).
         time_grid += min_time_s_units
 
         # Midpoints between time grid edges, shape (n_times - 1,).
