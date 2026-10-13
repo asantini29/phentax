@@ -12,6 +12,7 @@ IMRPhenomTHM_TF interface class for time-frequency waveform generation.
 Subclasses IMRPhenomTHM and adds Fresnel representations, intended for pre-merger signals.
 """
 
+from functools import partial
 from typing import Optional
 
 import jax
@@ -198,6 +199,103 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
 
         return phase_coeffs, amplitude_coeffs
 
+    def _place_waveform_at_time(
+        self,
+        waveform_modes: Array,
+        indices_modes: Array,
+        K_plus: Array,
+        K_cross: Array,
+        n_freq: int,
+    ) -> tuple[Array, Array]:
+        """
+        Place waveforms from all modes into the frequency grid for a single time step.
+
+        Parameters
+        ----------
+        waveform_modes : Array
+            Complex waveform values, shape (n_modes, 2*closest_f_bins).
+        indices_modes : Array
+            Frequency grid index of each waveform value, shape (n_modes, 2*closest_f_bins).
+        K_plus : Array
+            Complex coefficients for the plus polarization, shape (n_modes,).
+        K_cross : Array
+            Complex coefficients for the cross polarization, shape (n_modes,).
+        n_freq : int
+            Number of bins in the frequency grid. Must be a Python int (static).
+
+        Returns
+        -------
+        result_plus : Array
+            Plus polarization summed across modes at the correct frequency positions, shape (n_freq,).
+        result_cross : Array
+            Cross polarization summed across modes at the correct frequency positions, shape (n_freq,).
+        """
+        # Multiply by K *before* flattening, so each mode's scalar broadcasts across
+        # its 2*closest_f_bins frequency entries. Shape (n_modes, 2*closest_f_bins).
+        h_plus_modes = K_plus[:, None] * waveform_modes
+        h_cross_modes = K_cross[:, None] * waveform_modes
+
+        # Flatten across modes and frequency bins.
+        flat_h_plus = h_plus_modes.flatten()
+        flat_h_cross = h_cross_modes.flatten()
+        flat_indices = indices_modes.flatten()
+
+        # Zero the contributions from out-of-bounds indices.
+        valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
+        flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
+        flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
+
+        # Clip indices to the valid range so .at[].add() stays in bounds; the zeroed
+        # values above mean nothing is added for these entries.
+        flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
+
+        result_plus = (
+            jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_plus)
+        )
+        result_cross = (
+            jnp.zeros(n_freq, dtype=jnp.complex128).at[flat_indices].add(flat_h_cross)
+        )
+
+        return result_plus, result_cross
+
+    def _process_source(
+        self,
+        waveforms_per_source: Array,
+        indices_per_source: Array,
+        K_plus: Array,
+        K_cross: Array,
+        n_freq: int,
+    ) -> tuple[Array, Array]:
+        """
+        Place the waveform values of a single source onto the frequency grid for all time steps.
+
+        Parameters
+        ----------
+        waveforms_per_source : Array
+            Waveform values for one source on the per-mode frequency bins,
+            shape (n_times - 1, n_modes, 2*closest_f_bins).
+        indices_per_source : Array
+            Frequency grid index of each waveform value, shape (n_times - 1, n_modes, 2*closest_f_bins).
+        K_plus : Array
+            Complex coefficients for the plus polarization, shape (n_modes,).
+        K_cross : Array
+            Complex coefficients for the cross polarization, shape (n_modes,).
+        n_freq : int
+            Number of bins in the frequency grid. Must be a Python int (static).
+
+        Returns
+        -------
+        tf_plus : Array
+            Plus polarization TF map for this source, shape (n_times - 1, n_freq).
+        tf_cross : Array
+            Cross polarization TF map for this source, shape (n_times - 1, n_freq).
+        """
+        # vmap over time steps. n_freq is bound with partial so it stays a Python int.
+        return jax.vmap(
+            partial(self._place_waveform_at_time, n_freq=n_freq),
+            in_axes=(0, 0, None, None),
+        )(waveforms_per_source, indices_per_source, K_plus, K_cross)
+
     @jax.jit(static_argnums=[0, 16])
     def get_tf_fresnel_waveform_vanilla_TF(
         self,
@@ -242,8 +340,8 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             match the time-domain IMRPhenomTHM, which starts each source at its own t(f_min).
             For a batch-independent start, pass a scalar t_min instead.
 
-            In comparison to "natural ground truth" which will have all the modes at all the times, 
-            this is a more natural construction. 
+            In comparison to "natural ground truth" which will have all the modes at all the times,
+            this is a more natural construction.
 
         Parameters
         ----------
@@ -333,17 +431,19 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         min_time_s_units = jnp.min(time_min_physical_all)
 
         # The time grid starts at 0, and every source's merger is at t = 0, so adding
-        # min_time_s_units makes the grid relative to merger, starting at the start of the
-        # longest waveform. Units: seconds. Every other source is therefore evaluated from
-        # before its own t(f_min), i.e. below f_min (see the docstring note).
-        time_grid += min_time_s_units
+        # min_time_s_units gives the same grid relative to merger, starting at the start of
+        # the longest waveform. Units: seconds. Every other source is therefore evaluated
+        # from before its own t(f_min), i.e. below f_min (see the docstring note).
+        # time_grid itself is left unchanged; it is only used for segment lengths below.
+        t_rel = time_grid + min_time_s_units
 
-        # The same time grid in mass units, separately for each binary.
+        # The merger-relative grid in mass units, separately for each binary,
+        # shape (num_sources, n_times).
         time_grids_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(
-            time_grid, wf_params.total_mass
+            t_rel, wf_params.total_mass
         )
 
-        new_mask = jnp.ones_like(time_grid, dtype=bool)
+        new_mask = jnp.ones_like(t_rel, dtype=bool)
 
         # Amplitudes and phases for every binary over the time grid.
         # new_mask is the same for all sources, hence in_axes=None for it.
@@ -376,9 +476,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         # amp_factor shape: (num_sources,) -> reshape for broadcasting.
         amplitudes *= wf_params.amp_factor[:, None, None]
 
-        # Shift the time grid back so that it starts at zero.
-        time_grid -= min_time_s_units
-
         # Frequency grid spacing (assumed uniform).
         dF = frequency_grid[1] - frequency_grid[0]
 
@@ -395,21 +492,20 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             dtype=jnp.int32,
         )
 
-        # This loop could also be vmapped over time steps, but it is kept as a loop for readability.
-        for time_index in range(time_grid.size - 1):  # -1 since t_1 is the next edge
+        # This loop could also be vmapped over time steps, but it is kept as a loop for readability in this case.
+        for time_index in range(
+            time_grid.size - 1
+        ):  # -1 since each segment ends at the next edge
 
-            t_0 = time_grid[time_index]
-            t_1 = time_grid[time_index + 1]
-
-            # Convert t_0 to mass units for each binary, shape (num_sources,).
-            t_0_mass = jax.vmap(second_to_mass, in_axes=(None, 0))(
-                t_0 + min_time_s_units, wf_params.total_mass
-            )
+            # Segment length, and the segment start in mass units for each binary,
+            # shape (num_sources,).
+            seg_len = time_grid[time_index + 1] - time_grid[time_index]
+            t_0_mass = time_grids_mass_units[:, time_index]
 
             Amps = amplitudes[:, :, time_index]  # (num_sources, n_modes)
             Phases = phases[:, :, time_index]  # (num_sources, n_modes)
 
-            # Compute f_0 and f_dot at t_0 for every (source, mode) combination.
+            # Compute f_0 and f_dot at the segment start for every (source, mode) combination.
             # overall_phase_coeffs holds the phase coefficients of all (positive) modes for
             # all binaries; each field has shape (num_sources, n_modes, ...).
             #
@@ -488,9 +584,9 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
                 )
             )
 
-            # Fresnel integrals between t_0 and t_1.
-            v_nm_end = v(f_dot, t_0, t_1, frequencies, f_0)
-            v_nm_begin = v(f_dot, t_0, t_0, frequencies, f_0)
+            # Fresnel integrals over the segment, from tau = 0 (segment start) to tau = seg_len.
+            v_nm_end = v_tukey(f_dot, seg_len, frequencies, f_0, 0.0)
+            v_nm_begin = v_tukey(f_dot, 0.0, frequencies, f_0, 0.0)
             S_vn_end, C_vn_end = jax.scipy.special.fresnel(v_nm_end)
             S_vn_begin, C_vn_begin = jax.scipy.special.fresnel(v_nm_begin)
 
@@ -546,70 +642,11 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             * (y_lms[:, :, 0] - (-1) ** self.negative_ls * y_lmms[:, :, 0].conj())
         ).conj()
 
-        def place_waveform_at_time(waveform_modes, indices_modes, K_plus, K_cross):
-            """
-            Place waveforms from all modes into the frequency grid for a single time step.
-
-            waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
-            indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
-            K_plus: (n_modes,) - complex coefficients for plus polarization
-            K_cross: (n_modes,) - complex coefficients for cross polarization
-
-            Returns: two (n_freq,) arrays, plus and cross, summed across modes at the
-            correct frequency positions.
-            """
-            # Multiply by K *before* flattening, so each mode's scalar broadcasts across
-            # its 2*closest_f_bins frequency entries. Shape (n_modes, 2*closest_f_bins).
-            h_plus_modes = K_plus[:, None] * waveform_modes
-            h_cross_modes = K_cross[:, None] * waveform_modes
-
-            # Flatten across modes and frequency bins.
-            flat_h_plus = h_plus_modes.flatten()
-            flat_h_cross = h_cross_modes.flatten()
-            flat_indices = indices_modes.flatten()
-
-            # Zero the contributions from out-of-bounds indices.
-            valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
-            flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
-            flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
-
-            # Clip indices to the valid range so .at[].add() stays in bounds; the zeroed
-            # values above mean nothing is added for these entries.
-            flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
-
-            result_plus = (
-                jnp.zeros(n_freq, dtype=jnp.complex128)
-                .at[flat_indices]
-                .add(flat_h_plus)
-            )
-            result_cross = (
-                jnp.zeros(n_freq, dtype=jnp.complex128)
-                .at[flat_indices]
-                .add(flat_h_cross)
-            )
-
-            return result_plus, result_cross
-
-        def process_source(waveforms_per_source, indices_per_source, K_plus, K_cross):
-            """
-            Process all time steps for a single source.
-
-            waveforms_per_source: (n_times - 1, n_modes, 2*closest_f_bins) - waveform values
-                for one source, on the per-mode frequency bins
-            indices_per_source: (n_times - 1, n_modes, 2*closest_f_bins)
-            K_plus: (n_modes,) - complex coefficients for plus polarization
-            K_cross: (n_modes,) - complex coefficients for cross polarization
-
-            Returns: two (n_times - 1, n_freq) arrays, the plus and cross TF maps for this source.
-            """
-            # vmap over time steps.
-            return jax.vmap(place_waveform_at_time, in_axes=(0, 0, None, None))(
-                waveforms_per_source, indices_per_source, K_plus, K_cross
-            )
-
-        # vmap over sources. Together with the vmap over time steps in process_source,
+        # vmap over sources. Together with the vmap over time steps in _process_source,
         # this gives TF grids of shape (num_sources, n_times - 1, n_freq).
-        tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
+        tf_grid_plus, tf_grid_cross = jax.vmap(
+            partial(self._process_source, n_freq=n_freq)
+        )(
             waveform_storage_transposed,
             frequency_indices_transposed,
             K_plus_lms,
@@ -752,14 +789,16 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         min_time_s_units = jnp.min(time_min_physical_all)
 
         # The time grid starts at 0, and every source's merger is at t = 0, so adding
-        # min_time_s_units makes the grid relative to merger, starting at the start of the
-        # longest waveform. Units: seconds. Every other source is therefore evaluated from
-        # before its own t(f_min), i.e. below f_min (see the docstring note).
-        time_grid += min_time_s_units
+        # min_time_s_units gives the same grid relative to merger, starting at the start of
+        # the longest waveform. Units: seconds. Every other source is therefore evaluated
+        # from before its own t(f_min), i.e. below f_min (see the docstring note).
+        # time_grid itself is left unchanged; it is only used for the segment width below.
+        t_rel = time_grid + min_time_s_units
 
-        # Midpoints between time grid edges, shape (n_times - 1,).
-        t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])
+        # Segment midpoints relative to merger, shape (n_times - 1,).
+        t_grid_midpoints = 0.5 * (t_rel[:-1] + t_rel[1:])
 
+        # Midpoints in mass units, separately for each binary, shape (num_sources, n_times - 1).
         t_grid_midpoints_mass_units = jax.vmap(second_to_mass, in_axes=(None, 0))(
             t_grid_midpoints, wf_params.total_mass
         )
@@ -796,26 +835,11 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         # amp_factor shape: (num_sources,) -> reshape for broadcasting.
         amplitudes *= wf_params.amp_factor[:, None, None]
 
-        # Shift the time grid back so that it starts at zero.
-        time_grid -= min_time_s_units
-        t_grid_midpoints = 0.5 * (time_grid[:-1] + time_grid[1:])
-
         # Frequency grid spacing (assumed uniform).
         dF = frequency_grid[1] - frequency_grid[0]
 
-        # Per-segment inputs for the scan over time segments. Units: seconds.
-        t0_all = time_grid[:-1]  # Segment start times
-        t1_all = time_grid[1:]  # Segment end times
-        tmid_all = t_grid_midpoints  # Segment midpoints
-
         # Midpoints in mass units for computing f and f_dot, shape (n_times - 1, num_sources).
-        tmid_mass_all = jax.vmap(
-            lambda t_mid: jax.vmap(second_to_mass, in_axes=(None, 0))(
-                # t_mid starts at 0, so shift it back to be relative to merger.
-                t_mid + min_time_s_units,
-                wf_params.total_mass,
-            )
-        )(tmid_all)
+        tmid_mass_all = t_grid_midpoints_mass_units.T
 
         # Transpose to (n_times - 1, num_sources, n_modes) for scanning over time segments.
         amps_all = amplitudes.transpose(2, 0, 1)
@@ -879,14 +903,12 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         )
 
         # Width of each time segment (the time grid must be uniform).
-        dT = t1_all[0] - t0_all[0]
+        dT = time_grid[1] - time_grid[0]
 
         alpha_offset = 1 / (tukey_alpha * dT)
 
         def scan_step(_, scan_inputs):
             (
-                t_0,
-                t_midpoint,
                 Amps,
                 Phases,
                 f_0,
@@ -896,12 +918,13 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             ) = scan_inputs
 
             # Vectorized Fresnel integral with a Tukey window.
-            # Prefactor common to all terms of the integral.
+            # Prefactor common to all terms of the integral. The last factor shifts the
+            # time origin from the segment midpoint to the segment start (t_mid - t_0 = dT/2).
             h_prefactor = (
                 Amps[:, :, jnp.newaxis]
                 * jnp.exp(1j * Phases[:, :, jnp.newaxis])
                 / jnp.sqrt(2 * f_dot[:, :, jnp.newaxis])
-                * jnp.exp(-2 * 1j * jnp.pi * frequencies * (t_midpoint - t_0))
+                * jnp.exp(-2 * 1j * jnp.pi * frequencies * (0.5 * dT))
             )
 
             # Phase factor for the flat part.
@@ -936,7 +959,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             # All Fresnel arguments, shape (12, num_sources, n_modes, 2*closest_f_bins).
             # fmt: off
             args = jnp.stack(
-                [v_new(f_dot, t, frequencies, f_0) for t in (tau0, tau1, tau2, tau3)]                    # Flat parts
+                [v_tukey(f_dot, t, frequencies, f_0, 0.0) for t in (tau0, tau1, tau2, tau3)]            # Flat parts
                 + [v_tukey(f_dot, t, frequencies, f_0, alpha_offset) for t in (tau0, tau1, tau2, tau3)]  # Tapers, +alpha_offset
                 + [v_tukey(f_dot, t, frequencies, f_0, -alpha_offset) for t in (tau0, tau1, tau2, tau3)] # Tapers, -alpha_offset
             )
@@ -989,8 +1012,6 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             scan_step,
             None,
             (
-                t0_all,
-                tmid_all,
                 amps_all,
                 phases_all,
                 f_0_all,
@@ -1045,70 +1066,13 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             * (y_lms[:, :, 0] - (-1) ** self.negative_ls * y_lmms[:, :, 0].conj())
         ).conj()
 
-        def place_waveform_at_time(waveform_modes, indices_modes, K_plus, K_cross):
-            """
-            Place waveforms from all modes into the frequency grid for a single time step.
-
-            waveform_modes: (n_modes, 2*closest_f_bins) - complex waveform values
-            indices_modes: (n_modes, 2*closest_f_bins) - frequency bin indices
-            K_plus: (n_modes,) - complex coefficients for plus polarization
-            K_cross: (n_modes,) - complex coefficients for cross polarization
-
-            Returns: two (n_freq,) arrays, plus and cross, summed across modes at the
-            correct frequency positions.
-            """
-            # Multiply by K *before* flattening, so each mode's scalar broadcasts across
-            # its 2*closest_f_bins frequency entries. Shape (n_modes, 2*closest_f_bins).
-            h_plus_modes = K_plus[:, None] * waveform_modes
-            h_cross_modes = K_cross[:, None] * waveform_modes
-
-            # Flatten across modes and frequency bins.
-            flat_h_plus = h_plus_modes.flatten()
-            flat_h_cross = h_cross_modes.flatten()
-            flat_indices = indices_modes.flatten()
-
-            # Zero the contributions from out-of-bounds indices.
-            valid_mask = (flat_indices >= 0) & (flat_indices < n_freq)
-            flat_h_plus = jnp.where(valid_mask, flat_h_plus, 0.0)
-            flat_h_cross = jnp.where(valid_mask, flat_h_cross, 0.0)
-
-            # Clip indices to the valid range so .at[].add() stays in bounds; the zeroed
-            # values above mean nothing is added for these entries.
-            flat_indices = jnp.clip(flat_indices, 0, n_freq - 1)
-
-            result_plus = (
-                jnp.zeros(n_freq, dtype=jnp.complex128)
-                .at[flat_indices]
-                .add(flat_h_plus)
-            )
-            result_cross = (
-                jnp.zeros(n_freq, dtype=jnp.complex128)
-                .at[flat_indices]
-                .add(flat_h_cross)
-            )
-
-            return result_plus, result_cross
-
-        def process_source(waveforms_per_source, indices_per_source, K_plus, K_cross):
-            """
-            Process all time steps for a single source.
-
-            waveforms_per_source: (n_times - 1, n_modes, 2*closest_f_bins) - waveform values
-                for one source, on the per-mode frequency bins
-            indices_per_source: (n_times - 1, n_modes, 2*closest_f_bins)
-            K_plus: (n_modes,) - complex coefficients for plus polarization
-            K_cross: (n_modes,) - complex coefficients for cross polarization
-
-            Returns: two (n_times - 1, n_freq) arrays, the plus and cross TF maps for this source.
-            """
-            # vmap over time steps.
-            return jax.vmap(place_waveform_at_time, in_axes=(0, 0, None, None))(
-                waveforms_per_source, indices_per_source, K_plus, K_cross
-            )
-
-        # vmap over sources. Together with the vmap over time steps in process_source,
+        # vmap over sources. Together with the vmap over time steps in _process_source,
         # this gives TF grids of shape (num_sources, n_times - 1, n_freq).
-        tf_grid_plus, tf_grid_cross = jax.vmap(process_source)(
+        # Partial as all others arguments have shapes (num_sources, n_modes, 2*closest_f_bins) and are constant for all time steps.
+        # While n_freq is a constant for all sources. 
+        tf_grid_plus, tf_grid_cross = jax.vmap(
+            partial(self._process_source, n_freq=n_freq)
+        )(
             waveform_storage_transposed,
             frequency_indices_transposed,
             K_plus_lms,
@@ -1124,74 +1088,42 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
 
 
 @jax.jit
-def v(f_dot_0, t_0, t_1, f, f_0):
-    """
-    Fresnel argument for the box-car (vanilla) kernel, with the mode expanded about the segment start t_0.
-
-    Within a segment each mode is linearised as f(t) = f_0 + f_dot_0 * (t - t_0). Completing the square in the
-    phase 2*pi*[(f_0 - f)*(t - t_0) + f_dot_0*(t - t_0)**2 / 2] gives the Fresnel argument
-
-        v = sqrt(2*f_dot_0) * ((t_1 - t_0) + (f_0 - f) / f_dot_0),
-
-    so the segment integral is C(v(t_1)) - C(v(t_0)) + i*(S(v(t_1)) - S(v(t_0))).
-    Used by `IMRPhenomTHM_TF.get_tf_fresnel_waveform_vanilla_TF`, which calls it with t_1 = t_0 for the lower limit.
-
-    Parameters
-    ----------
-    f_dot_0 : Array
-        Frequency derivative of each mode at t_0, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
-        num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
-    t_0 : float
-        Expansion time, the start of the segment. Units: seconds.
-    t_1 : float
-        Time at which the argument is evaluated, the end of the segment (or t_0 for the lower limit). Units: seconds.
-    f : Array
-        Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
-        n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
-    f_0 : Array
-        Frequency of each mode at t_0, shape (num_sources, n_modes). Units: Hz.
-
-    Returns
-    -------
-    fresnel_argument : Array
-        Dimensionless Fresnel argument, shape (num_sources, n_modes, n_bins).
-    """
-    fresnel_argument = jnp.sqrt(2 * f_dot_0[:, :, jnp.newaxis]) * (
-        (t_1 - t_0) + (f_0[:, :, jnp.newaxis] - f) / f_dot_0[:, :, jnp.newaxis]
-    )
-    return fresnel_argument
-
-
-@jax.jit
 def v_tukey(f_dot_0, tau, f, f_0, alpha_term):
     """
-    Fresnel argument for the roll-on/roll-off pieces of the Tukey-window kernel, expanded about the segment midpoint.
+    Fresnel argument for the time-frequency kernels, with each mode linearised about an expansion time t_e.
 
-    In the tapers the Tukey window is 1/2 * (1 - cos(2*pi*(tau - tau_edge) / (alpha*dT))). Writing the cosine as two
-    exponentials shifts the frequency of the integrand by +/- 1/(alpha*dT), so the argument is that of `v_new`
-    with f_0 - f replaced by f_0 - f + alpha_term:
+    Within a segment each mode is linearised as f(t) = f_0 + f_dot_0 * tau, with tau = t - t_e. Completing the
+    square in the phase 2*pi*[(f_0 - f + alpha_term)*tau + f_dot_0*tau**2 / 2] gives the Fresnel argument
 
-        v = sqrt(2*f_dot_0) * (tau + (f_0 - f + alpha_term) / f_dot_0).
+        v = sqrt(2*f_dot_0) * (tau + (f_0 - f + alpha_term) / f_dot_0),
 
-    Used by `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint`, evaluated at the four segment edges
-    tau0..tau3 for both signs of alpha_term. The +alpha_term results pair with phase_prefactor_plus,
-    the -alpha_term results with phase_prefactor_minus.
+    so the integral between tau_a and tau_b is C(v(tau_b)) - C(v(tau_a)) + i*(S(v(tau_b)) - S(v(tau_a))).
+
+    Used in three ways:
+        - Box-car kernel (`IMRPhenomTHM_TF.get_tf_fresnel_waveform_vanilla_TF`): t_e is the segment start t_0,
+          alpha_term = 0, evaluated at tau = t_1 - t_0 (upper limit) and tau = 0 (lower limit).
+        - Flat (unit-weight) pieces of the Tukey kernel (`IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint`):
+          t_e is the segment midpoint, alpha_term = 0, evaluated at tau0..tau3. Pairs with normal_phase_prefactor.
+        - Roll-on/roll-off pieces of the Tukey kernel: in the tapers the window is
+          1/2 * (1 - cos(2*pi*(tau - tau_edge) / (alpha*dT))). Writing the cosine as two exponentials shifts the
+          frequency of the integrand by +/- 1/(alpha*dT), hence alpha_term = +/- alpha_offset. The +alpha_term
+          results pair with phase_prefactor_plus, the -alpha_term results with phase_prefactor_minus.
 
     Parameters
     ----------
     f_dot_0 : Array
-        Frequency derivative of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
+        Frequency derivative of each mode at t_e, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
         num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
     tau : float
-        Time relative to the segment midpoint at which the argument is evaluated, one of
-        -dT/2, -dT/2*(1 - alpha), dT/2*(1 - alpha), dT/2. Units: seconds.
+        Time relative to t_e at which the argument is evaluated. Units: seconds.
     f : Array
         Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
         n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
     f_0 : Array
-        Frequency of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz.
+        Frequency of each mode at t_e, shape (num_sources, n_modes). Units: Hz.
     alpha_term : float
-        Frequency shift from the Tukey taper, +/- 1/(tukey_alpha*dT) (alpha_offset in the caller). Units: Hz.
+        Frequency shift from the Tukey taper, +/- 1/(tukey_alpha*dT) (alpha_offset in the caller),
+        or 0 for the box-car kernel and the flat Tukey pieces. Units: Hz.
 
     Returns
     -------
@@ -1200,43 +1132,5 @@ def v_tukey(f_dot_0, tau, f, f_0, alpha_term):
     """
     fresnel_argument = jnp.sqrt(2 * f_dot_0[:, :, jnp.newaxis]) * (
         tau + (f_0[:, :, jnp.newaxis] - f + alpha_term) / f_dot_0[:, :, jnp.newaxis]
-    )
-    return fresnel_argument
-
-
-@jax.jit
-def v_new(f_dot_0, tau, f, f_0):
-    """
-    Fresnel argument for the flat (unit-weight) pieces of the Tukey-window kernel, expanded about the segment midpoint.
-
-    Within a segment each mode is linearised as f(tau) = f_0 + f_dot_0 * tau, with tau measured from the midpoint:
-
-        v = sqrt(2*f_dot_0) * (tau + (f_0 - f) / f_dot_0).
-
-    This is `v_tukey` with alpha_term = 0, and `v` with the expansion point moved from the segment
-    start to the midpoint. Used by `IMRPhenomTHM_TF.get_tf_fresnel_tukey_midpoint`, evaluated at the
-    four segment edges tau0..tau3; the results pair with normal_phase_prefactor.
-
-    Parameters
-    ----------
-    f_dot_0 : Array
-        Frequency derivative of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz^2. Must be > 0.
-        num_sources: binaries in the batch. n_modes: positive-m modes, (2,2) first, then self.higher_modes.
-    tau : float
-        Time relative to the segment midpoint at which the argument is evaluated, one of
-        -dT/2, -dT/2*(1 - alpha), dT/2*(1 - alpha), dT/2. Units: seconds.
-    f : Array
-        Frequency bins at which the kernel is evaluated, shape (num_sources, n_modes, n_bins). Units: Hz.
-        n_bins = 2*closest_f_bins: the bins around the grid frequency closest to f_0, for that source and mode.
-    f_0 : Array
-        Frequency of each mode at the segment midpoint, shape (num_sources, n_modes). Units: Hz.
-
-    Returns
-    -------
-    fresnel_argument : Array
-        Dimensionless Fresnel argument, shape (num_sources, n_modes, n_bins).
-    """
-    fresnel_argument = jnp.sqrt(2 * f_dot_0[:, :, jnp.newaxis]) * (
-        tau + (f_0[:, :, jnp.newaxis] - f) / f_dot_0[:, :, jnp.newaxis]
     )
     return fresnel_argument
