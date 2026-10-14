@@ -652,7 +652,7 @@ def imr_omega(
     Parameters
     ----------
     time : float | Array
-        Time(s) at which to compute the phase.
+        Time(s) at which to compute the frequency.
     eta : float | Array
         Symmetric mass ratio.
     phase_coeffs : PhaseCoeffs
@@ -661,7 +661,7 @@ def imr_omega(
     Returns
     -------
     Array
-        Phase value(s) at the given time(s).
+        Frequency value(s) at the given time(s).
     """
     m = phase_coeffs.mode % 10
     # Prepare coefficient arrays for helper functions
@@ -753,7 +753,7 @@ def imr_omega_dot(
     Parameters
     ----------
     time : float | Array
-        Time(s) at which to compute the phase.
+        Time(s) at which to compute the frequency derivative.
     eta : float | Array
         Symmetric mass ratio.
     phase_coeffs : PhaseCoeffs
@@ -824,7 +824,9 @@ def imr_phase(
         is_ringdown = t >= phase_coeffs.ringdown_cut
 
         # 0 if insp, 1 if interm, 2 if ringdown
-        region_idx = is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32)
+        # Convert to scalar int for jax.lax.switch (preserves vmap compatibility)
+        region_idx = (is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32))
+        region_idx = jnp.atleast_1d(region_idx).ravel()[0]
 
         def _inspiral(t, _phase_22):
             return _inspiral_ansatz_phase_value(

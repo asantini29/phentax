@@ -515,7 +515,7 @@ def compute_amplitude_coeffs_hm(
 
     Parameters
     ----------
-    wf_pafams : WaveformParams
+    wf_params : WaveformParams
         Waveform parameters.
     phase_coeffs_22 : PhaseCoeffs
         Phase coefficients for the 22 mode.
@@ -705,7 +705,9 @@ def imr_amplitude(
         is_ringdown = t >= amp_coeffs.ringdown_cut
 
         # 0 if insp, 1 if interm, 2 if ringdown
-        region_idx = is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32)
+        # Convert to scalar int for jax.lax.switch (preserves vmap compatibility)
+        region_idx = (is_post_inspiral.astype(jnp.int32) + is_ringdown.astype(jnp.int32))
+        region_idx = jnp.atleast_1d(region_idx).ravel()[0]
 
         def _inspiral(t):
             # Need omega from 22 mode
