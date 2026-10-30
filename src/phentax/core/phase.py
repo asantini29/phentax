@@ -928,7 +928,7 @@ def get_time_of_frequency(
         # is <= 1/4 by the AM-GM inequality, we get a lower t_low (since there's a negative coefficient).
         # This can plausibly fail in certain cases when M < 1 in whatever units you use, but in most cases
         # we will get a number low enough. You can always make the abs. value of the coefficient larger.
-        lambda: -0.015 * freq ** (-8/3) / eta,  # enlarging this a bit
+        lambda: -0.02 * freq ** (-8/3) / eta,  # enlarging this a bit
         lambda: t_low,
     )
 
@@ -950,9 +950,9 @@ def get_time_of_frequency(
         time_of_freq,
         solver,
         args=freq,
-        y0=-0.01 * freq ** (-2.7),
+        y0=-0.01 * freq ** (-8 / 3) / eta,  # initial guess based on Newtonian approximation
         options={"lower": t_low, "upper": t_high},
-        max_steps=1000,
+        max_steps=2000,
     )
 
     return time_root.value
