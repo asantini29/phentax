@@ -470,11 +470,25 @@ def compute_phase_coeffs_22(
     # wf_params = wf_params._replace(Mt_ref=_Mt_ref)
     wf_params = eqx.tree_at(lambda p: p.Mt_ref, wf_params, _Mt_ref)
 
+    # A failed t(f) root solve returns NaN. Keep the length/grid computation
+    # well-defined for that source (NaN -> int cast is garbage) and flag the failure
+    # through phiref0, which enters every mode's phase: the source's strain becomes
+    # NaN while the rest of the batch is unaffected.
+    root_ok = jnp.isfinite(wf_params.Mt_min) & jnp.isfinite(_Mt_ref)
+    wf_params = eqx.tree_at(
+        lambda p: p.Mt_min,
+        wf_params,
+        jnp.where(root_ok, wf_params.Mt_min, -wf_params.Mdelta_t),
+    )
+
     wf_params = compute_wf_length_params(
         wf_params
     )  # compute waveform length parameters based on Mt_min
-    phiref0 = imr_phase(_Mt_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
+    phiref0 = imr_phase(
+        jnp.where(root_ok, _Mt_ref, 0.0), wf_params.eta, PhaseCoeffs22
+    )  # phase at tref
     # phiref0 = imr_phase(wf_params.t_ref, wf_params.eta, PhaseCoeffs22)  # phase at tref
+    phiref0 = jnp.where(root_ok, phiref0, jnp.nan)  # root-failure flag
     return wf_params, eqx.tree_at(lambda p: p.phiref0, PhaseCoeffs22, phiref0)
 
 
@@ -942,9 +956,20 @@ def get_time_of_frequency(
         omega = imr_omega(time, eta, phase_coeffs)
         return 2 * jnp.pi * freq - omega
 
+    # Explicit bracket check. optimistix's default flip="detect" performs this check
+    # with an eqx.error_if that raises at runtime regardless of `throw=`, crashing the
+    # whole (vmapped) batch. Here a failed bracket instead yields NaN for that element.
+    # g(t) = 2*pi*f - omega(t) decreases with t: a valid bracket needs g(lower) > 0 > g(upper).
+    g_low = time_of_freq(t_low, freq)
+    g_high = time_of_freq(t_high, freq)
+    bracket_ok = (
+        jnp.isfinite(g_low) & jnp.isfinite(g_high) & (g_low > 0.0) & (g_high < 0.0)
+    )
+
     solver = optx.Bisection(  # type: ignore
         atol=atol,
         rtol=rtol,
+        flip=True,  # g(lower) > g(upper); skips optimistix's internal detect + error_if
     )
     time_root: optx.Solution = optx.root_find(
         time_of_freq,
@@ -953,9 +978,11 @@ def get_time_of_frequency(
         y0=-0.01 * freq ** (-8 / 3) / eta,  # initial guess based on Newtonian approximation
         options={"lower": t_low, "upper": t_high},
         max_steps=2000,
+        throw=False,
     )
 
-    return time_root.value
+    ok = bracket_ok & (time_root.result == optx.RESULTS.successful)
+    return jnp.where(ok, time_root.value, jnp.nan)
 
 
 # =============================================================================

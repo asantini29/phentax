@@ -92,8 +92,13 @@ class IMRPhenomTHM:
         rtol: float = 1e-12,
         T: float | None = None,
         coarse_graining_scale_factor: float = DEFAULT_SCALE_FACTOR,
+        raise_on_root_failure: bool = True,
         # todo add time options. return interpolant / dense array / sparse array
     ):
+        # If the t(f) root solve fails for a source (invalid bracket / non-finite input):
+        # True -> raise a ValueError listing the offending parameters;
+        # False -> log a warning and return NaN polarizations for that source only.
+        self.raise_on_root_failure = raise_on_root_failure
         if higher_modes is None:
             self.higher_modes = jnp.array([])
             self.has_hm = False
@@ -1327,6 +1332,41 @@ class IMRPhenomTHM:
 
         return times, mask
 
+    def _check_root_failures(
+        self,
+        phase_coeffs_22: PhaseCoeffs,
+        m1: float | Array,
+        m2: float | Array,
+        chi1z: float | Array,
+        chi2z: float | Array,
+        f_min: float | Array,
+        f_ref: float | Array,
+    ) -> None:
+        """
+        Report sources whose t(f) root solve failed (flagged by a NaN ``phiref0``).
+
+        Raises a ValueError if ``self.raise_on_root_failure``, otherwise logs a warning
+        (those sources then have NaN polarizations). No-op while tracing.
+        """
+        if is_tracing(phase_coeffs_22.phiref0):
+            return
+        bad = ~jnp.isfinite(jnp.atleast_1d(phase_coeffs_22.phiref0))
+        if not bool(jnp.any(bad)):
+            return
+        idx = jnp.nonzero(bad)[0]
+        m1_b, m2_b, c1_b, c2_b = jnp.broadcast_arrays(
+            *(jnp.atleast_1d(jnp.asarray(x)) for x in (m1, m2, chi1z, chi2z))
+        )
+        msg = (
+            "phentax: t(f) root finding failed (no valid bracket / non-finite input) "
+            f"for batch indices {idx.tolist()}: m1={m1_b[idx].tolist()}, "
+            f"m2={m2_b[idx].tolist()}, chi1z={c1_b[idx].tolist()}, "
+            f"chi2z={c2_b[idx].tolist()}, f_min={f_min}, f_ref={f_ref}"
+        )
+        if self.raise_on_root_failure:
+            raise ValueError(msg)
+        logger.warning(msg + " -> returning NaN polarizations for these sources.")
+
     def initial_processing(
         self,
         m1: float | Array,
@@ -1445,6 +1485,7 @@ class IMRPhenomTHM:
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = jax.vmap(
             self._compute_coeffs_22
         )(wf_params)
+        self._check_root_failures(phase_coeffs_22, m1, m2, chi1z, chi2z, f_min, f_ref)
 
         if T is None:
             T = self.T

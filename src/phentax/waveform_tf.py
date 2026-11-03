@@ -65,6 +65,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         t_low_fit: bool = True,  # Use default fit for t_low if True.
         atol: float = 1e-12,
         rtol: float = 1e-12,
+        raise_on_root_failure: bool = True,
     ):
         super().__init__(
             higher_modes=higher_modes,
@@ -73,6 +74,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
             t_low_fit=t_low_fit,
             atol=atol,
             rtol=rtol,
+            raise_on_root_failure=raise_on_root_failure,
             # Observation time is unused by the TF methods; 1 month is a placeholder.
             T=1 * 30 * 24 * 3600,
         )
@@ -159,6 +161,7 @@ class IMRPhenomTHM_TF(IMRPhenomTHM):
         wf_params, amplitude_coeffs_22, phase_coeffs_22 = jax.vmap(
             self._compute_coeffs_22
         )(wf_params)
+        self._check_root_failures(phase_coeffs_22, m1, m2, chi1z, chi2z, f_min, f_ref)
 
         return wf_params, amplitude_coeffs_22, phase_coeffs_22
 
