@@ -2338,7 +2338,6 @@ source = { editable = "." }
 dependencies = [
     { name = "diffrax" },
     { name = "equinox" },
-    { name = "isort" },
     { name = "jax" },
     { name = "lisaconstants" },
     { name = "optimistix" },
@@ -2363,6 +2362,7 @@ cpu = [
 dev = [
     { name = "black" },
     { name = "ipykernel" },
+    { name = "isort" },
     { name = "matplotlib" },
     { name = "mypy" },
     { name = "phenomxpy" },
@@ -2393,7 +2393,6 @@ gpu = [
 requires-dist = [
     { name = "diffrax", specifier = ">=0.7.0" },
     { name = "equinox", specifier = ">=0.13.2" },
-    { name = "isort", specifier = ">=7.0.0" },
     { name = "jax", specifier = ">=0.8.1" },
     { name = "jax", extras = ["cpu"], marker = "extra == 'cpu'", specifier = ">=0.8.1" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda12'", specifier = ">=0.8.1" },
@@ -2409,6 +2408,7 @@ cpu = [{ name = "jax", extras = ["cpu"], specifier = ">=0.8.1" }]
 dev = [
     { name = "black", specifier = ">=25.12.0" },
     { name = "ipykernel", specifier = ">=7.1.0" },
+    { name = "isort", specifier = ">=7.0.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "mypy", specifier = ">=1.19.0" },
     { name = "phenomxpy", specifier = ">=0.1.1" },
