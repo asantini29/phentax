@@ -47,9 +47,9 @@ uv run <YOUR-COMMAND>
 ### Installation from the Python Package Index
 `phentax` can also be installed directly with `pip`. Currently, the latest version is available on [PyPI](https://pypi.org/project/phentax/). To install the latest version in your environment, run one of the following commands depending on your system configuration:
 ```
-pip install phentax[cpu]    # For CPU-only installation
-pip install phentax[cuda12] # For GPU installation with CUDA 12.x support
-pip install phentax[cuda13] # For GPU installation with CUDA 13.x support
+pip install phentax"[cpu]"    # For CPU-only installation
+pip install phentax"[cuda12]" # For GPU installation with CUDA 12.x support
+pip install phentax"[cuda13]" # For GPU installation with CUDA 13.x support
 ```
 We still recommend installing the package in a virtual environment to avoid conflicts with other projects.
 
