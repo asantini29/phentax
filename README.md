@@ -1,7 +1,7 @@
 # PhenTAX: a JAX Implementation of the IMRPhenomTHM waveform family
 
 [![Documentation](https://github.com/asantini29/phentax/actions/workflows/docs.yml/badge.svg)](https://asantini29.github.io/phentax/)
-[![TestPyPI](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ftest.pypi.org%2Fpypi%2Fphentax%2Fjson&query=%24.info.version&label=TestPyPI&logo=pypi)](https://test.pypi.org/project/phentax/)
+[![PyPI](https://img.shields.io/pypi/v/phentax)](https://pypi.org/project/phentax/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/asantini29/phentax/blob/main/LICENSE)
 [![DOI](https://zenodo.org/badge/1116467177.svg)](https://doi.org/10.5281/zenodo.19390392)
 
@@ -44,12 +44,12 @@ After installation, run your commands within this environment using:
 uv run <YOUR-COMMAND>
 ```
 
-### Installation from Package Index
-`phentax` can also be installed directly with `pip`. Currently, the latest version is available on [TestPyPI](https://test.pypi.org/simple/). To install the latest version in your environment, run one of the following commands depending on your system configuration:
+### Installation from the Python Package Index
+`phentax` can also be installed directly with `pip`. Currently, the latest version is available on [PyPI](https://pypi.org/project/phentax/). To install the latest version in your environment, run one of the following commands depending on your system configuration:
 ```
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cpu]' # For CPU-only installation
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda12]' # For GPU installation with CUDA 12.x support
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ 'phentax[cuda13]' # For GPU installation with CUDA 13.x support
+pip install phentax[cpu]    # For CPU-only installation
+pip install phentax[cuda12] # For GPU installation with CUDA 12.x support
+pip install phentax[cuda13] # For GPU installation with CUDA 13.x support
 ```
 We still recommend installing the package in a virtual environment to avoid conflicts with other projects.
 
@@ -107,4 +107,4 @@ This project is licensed under the MIT License. See the [LICENSE](https://github
 Contributions to this project are welcome! If you would like to contribute, please follow the guidelines outlined in the [CONTRIBUTING](https://github.com/asantini29/phentax/blob/main/CONTRIBUTING.md) file.
 
 ## Versioning
-This project uses [Semantic Versioning](https://semver.org/). Current version: [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ftest.pypi.org%2Fpypi%2Fphentax%2Fjson&query=%24.info.version&label=Version&logo=pypi)](https://test.pypi.org/project/phentax/)
+This project uses [Semantic Versioning](https://semver.org/). Current version: [![Version](https://img.shields.io/pypi/v/phentax)](https://pypi.org/project/phentax/)
