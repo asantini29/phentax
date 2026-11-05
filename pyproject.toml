@@ -1,6 +1,6 @@
 [project]
 name = "phentax"
-version = "1.0.0"
+version = "1.0.1"
 description = "JAX Implementation of the IMRPhenomT(HM) waveform family"
 authors = [{ name = "Alessandro Santini", email = "alessandro.santini@aei.mpg.de" }]
 readme = "README.md"
