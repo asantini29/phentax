@@ -1,0 +1,11 @@
+# inara build artifacts
+# paper.pdf -- keep pdf for action
+paper.tex
+paper.html
+paper.jats
+paper.crossref
+paper.preprint.tex
+paper.native
+CITATION.cff
+jats/
+*.log
